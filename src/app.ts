@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import connectDB from "./config/db";
 import userRoutes from "./routes/user.routes";
 import { errorHandler } from "./middlewares/error.middleware";
 import statusRoutes from "./routes/status.routes";
@@ -13,11 +12,10 @@ import categoryRoutes from "./routes/category.routes";
 import historyRoutes from "./routes/history.routes";
 import chatRoutes from "./routes/chat.routes";
 
+// Harmless at import time; several module-load constants (e.g. in the chat
+// controller) read env, so keep dotenv here. DB connection + app.listen live
+// in index.ts so that tests can `import app` without a real DB or open port.
 dotenv.config();
-connectDB().catch((err) => {
-  console.error("DB connection failed:", err);
-  process.exit(1);
-});
 
 const app = express();
 
@@ -53,5 +51,4 @@ app.use("/api/chat", chatRoutes);
 // Error Handler (must be last)
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+export default app;

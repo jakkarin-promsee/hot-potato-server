@@ -16,12 +16,34 @@ The REST API for Hot Potato: auth, content storage, student progress, image libr
 
 ```bash
 npm install
-npm run dev      # nodemon → ts-node src/app.ts   (auto-restart on change)
+npm run dev      # nodemon → ts-node src/index.ts   (auto-restart on change)
 npm run build    # tsc → dist/
-npm start        # node dist/app.js   (production; run build first)
+npm start        # node dist/index.js   (production; run build first)
 ```
 
-No tests yet. There is no linter configured on the server side.
+```bash
+npm test         # vitest run — unit + integration; offline (in-memory Mongo, Gemini mocked)
+npm run test:watch
+npm run test:ai  # live Gemini smoke; reads GEMINI_API_KEY from .env (vitest.ai.config sets RUN_AI_TESTS)
+```
+
+**Tests:** Vitest + supertest + `mongodb-memory-server` in `test/`. `npm test` runs fully **offline** (55 tests; no network, no real DB, no API key). `npm run test:ai` costs real tokens — run at phase boundaries only; loads `.env` in `test/setup.ts`.
+
+**Layout:**
+
+```
+server/test/
+├── setup.ts              # in-memory Mongo + test env vars
+├── fixtures/lesson.json  # committed lesson fixture (re-export from real DB via scripts/export-fixture.ts)
+├── helpers/seed.ts
+├── unit/                 # prompt builders, retry logic
+├── api/                  # auth, content, answers, chat (supertest)
+└── ai/                   # live Gemini smoke (*.ai.test.ts, excluded from npm test)
+```
+
+**Boot split:** `src/app.ts` builds and **exports** the Express app (no `listen`, no `connectDB` at import time). `src/index.ts` does `dotenv → connectDB → app.listen`. If Render's start command is hard-coded to `node dist/app.js`, change it to `node dist/index.js`.
+
+**Working agreement:** every later phase ships tests for its own acceptance criteria; you're not done until `npm test` is green.
 
 ## Architecture (MVC)
 
@@ -29,7 +51,8 @@ Request flow: **`app.ts` → route → middleware (`protect`) → controller →
 
 ```
 server/src/
-├── app.ts                  # entry: dotenv, DB connect, CORS, JSON, mount routes, error handler, listen
+├── app.ts                  # builds + exports Express app (no listen, no connectDB)
+├── index.ts                # entry: dotenv, DB connect, listen
 ├── config/db.ts            # Mongoose connection (uses MONGO_URI)
 ├── routes/*.routes.ts      # URL → controller wiring, applies auth guards
 ├── controllers/*.controller.ts   # request handling + business logic
@@ -129,7 +152,9 @@ Login/register return `{ user, token }`; the token is a JWT signed with `JWT_SEC
 
 ## AI integration (Gemini)
 
-All in `controllers/chat.controller.ts`. Uses `@google/generative-ai` with `GEMINI_API_KEY`. Default model: **`gemini-2.5-flash-lite`** (constant `MODEL_NAME`). Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`).
+> **🔥 This is the active rework area (roadmap Phase 2).** What's documented below is the *current* state. The plan — one unified `POST /api/chat/tutor` endpoint with server-side lesson context, real multi-turn conversations, student memory, and a warm Thai persona — is fully specced in [`../ROADMAP.md`](../ROADMAP.md) + [`../ROADMAP-detailed.md`](../ROADMAP-detailed.md). **Read those before touching AI code.** Two Golden Rules bind everything here: (1) never ration tokens for real students — rate-limit bots only; (2) anonymous users keep full AI access (no `protect` on chat routes; `optionalAuth` only).
+
+All in `controllers/chat.controller.ts`. Uses **`@google/generative-ai`** — ⚠️ this SDK was **deprecated upstream on 2025-11-30**; roadmap Phase 0 migrates to the unified **`@google/genai`** SDK. Default model: **`gemini-2.5-flash-lite`** (constant `MODEL_NAME`). Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`). A `generateWithRetry` wrapper retries transient network errors (the owner's ISP drops connections) — **keep it** across the migration.
 
 | Endpoint | Builder | What it does |
 | --- | --- | --- |
@@ -139,7 +164,7 @@ All in `controllers/chat.controller.ts`. Uses `@google/generative-ai` with `GEMI
 
 `feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The prompts enforce a warm, never-shaming tone and end with one actionable next step — **preserve that intent when editing prompts.**
 
-Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` (override the write-eval model). The controllers `console.log` the full prompt for `feedback`/`write-evaluate` — useful for debugging, consider gating behind a flag for production.
+Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` (override the write-eval model). The controllers currently `console.log` the full prompt for `feedback`/`write-evaluate` — ⚠️ this **leaks student answers into Render logs**; roadmap Phase 0.3 gates it behind `AI_DEBUG_PROMPTS=true` (default off).
 
 ## Conventions
 
@@ -164,12 +189,12 @@ Create `server/.env` (git-ignored). See [`README.md`](README.md) for description
 | `AI_OUTPUT_LANGUAGE` | no | `thai` (default) or `english` |
 | `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` | no | Override write-eval model |
 
-If `MONGO_URI` is bad the process **exits on boot** (`app.ts`). If `GEMINI_API_KEY` is missing, chat endpoints return 500 with a clear message.
+If `MONGO_URI` is bad the process **exits on boot** (`index.ts`). If `GEMINI_API_KEY` is missing, chat endpoints return 500 with a clear message.
 
 ## Gotchas
 
 - **Render cold starts.** Free tier sleeps; first request after idle is slow, on top of normal AI latency. The client must show loading states — don't treat slowness as failure.
-- **`/api/chat/*` is unauthenticated (🌐).** Anyone who knows the URL can spend your Gemini quota. If abuse/cost becomes a concern, add `protect` and/or rate limiting (and update the client, which currently calls these without relying on auth).
+- **`/api/chat/*` is unauthenticated (🌐) — and stays that way for humans (Golden Rule 2).** Anonymous students *must* keep full AI access. The fix for bot/quota abuse is **not** `protect`, it's **bot-only rate limiting** with limits generous enough that no human ever hits them (roadmap Phase 0.2 adds `express-rate-limit` + `app.set("trust proxy", 1)` for Render). Do not gate AI behind login.
 - **Optimistic concurrency on content update.** `PUT /content/:id` compares `clientUpdatedAt` to the server's `updatedAt` and returns **409** if the server copy is newer. The client must send `clientUpdatedAt` and handle conflicts.
 - **Denormalized author fields.** `author_name` / `collaborator_names` are recomputed via `contentAuthorSnapshot.service.ts` on create and when `collaborators` changes — `updateContent` deliberately drops client-sent values for these. If a user renames themselves, existing content's `author_name` won't auto-update.
 - **CORS is wide open** (`app.use(cors())`). Lock down origins before any real production hardening.

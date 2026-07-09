@@ -28,7 +28,7 @@ type FeedbackMode = "quick_check" | "full_reflection";
 
 // Transient network/service failures (dropped socket on a flaky link, Gemini
 // briefly overloaded, rate limit). These are worth retrying; anything else is not.
-const isTransientAIError = (e: unknown): boolean => {
+export const isTransientAIError = (e: unknown): boolean => {
   const msg = e instanceof Error ? e.message : String(e);
   return /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|timeout|503|429|overloaded|unavailable/i.test(
     msg,
@@ -40,7 +40,7 @@ const isTransientAIError = (e: unknown): boolean => {
 // connections for a few seconds at a time, and each Gemini call opens a fresh
 // connection, so we retry across a wide-enough window to outlast a typical
 // blip: 5 attempts, backing off 1s, 2s, 3s, 4s (~10s total) before giving up.
-async function generateWithRetry(
+export async function generateWithRetry(
   model: GenerativeModel,
   prompt: string,
   tries = 5,
@@ -94,7 +94,7 @@ function getLanguageInstruction(
     : "เขียนฟีดแบ็กเป็นภาษาไทยเป็นหลัก (4-7 ประโยค) โดยคงสูตร/คำเฉพาะเป็นภาษาเดิมได้";
 }
 
-function buildLearningPrompt(
+export function buildLearningPrompt(
   prompt: string,
   context: string,
   userContext: string,
@@ -118,7 +118,7 @@ function buildLearningPrompt(
   ].join("\n");
 }
 
-function buildFeedbackPrompt(
+export function buildFeedbackPrompt(
   question: string,
   correctAnswer: string,
   userAnswer: string,
@@ -172,7 +172,7 @@ function buildFeedbackPrompt(
   ].join("\n");
 }
 
-function buildWriteEvaluationPrompt(
+export function buildWriteEvaluationPrompt(
   question: string,
   guideAnswer: string,
   studentAnswer: string,
