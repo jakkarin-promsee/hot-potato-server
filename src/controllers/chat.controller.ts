@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
 
 interface AskChatBody {
   prompt?: unknown;
@@ -25,6 +25,42 @@ interface AskWriteEvaluationBody {
 }
 
 type FeedbackMode = "quick_check" | "full_reflection";
+
+// Transient network/service failures (dropped socket on a flaky link, Gemini
+// briefly overloaded, rate limit). These are worth retrying; anything else is not.
+const isTransientAIError = (e: unknown): boolean => {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|timeout|503|429|overloaded|unavailable/i.test(
+    msg,
+  );
+};
+
+// Wrap generateContent so a transient network blip becomes a silent retry
+// instead of a failed answer for the student. The ISP here drops outbound
+// connections for a few seconds at a time, and each Gemini call opens a fresh
+// connection, so we retry across a wide-enough window to outlast a typical
+// blip: 5 attempts, backing off 1s, 2s, 3s, 4s (~10s total) before giving up.
+async function generateWithRetry(
+  model: GenerativeModel,
+  prompt: string,
+  tries = 5,
+) {
+  let last: unknown;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      return await model.generateContent(prompt);
+    } catch (error) {
+      last = error;
+      if (attempt === tries || !isTransientAIError(error)) throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `Gemini transient error (attempt ${attempt}/${tries}), retrying: ${msg}`,
+      );
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
+  throw last;
+}
 
 const MODEL_NAME = "gemini-2.5-flash-lite";
 const WRITE_EVAL_MODEL_NAME = (
@@ -216,7 +252,7 @@ export const askChat = async (
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: MODEL_NAME });
     const finalPrompt = buildLearningPrompt(prompt, context, userContext);
-    const result = await model.generateContent(finalPrompt);
+    const result = await generateWithRetry(model, finalPrompt);
     const answer = result.response.text().trim();
 
     res.status(200).json({ answer });
@@ -291,7 +327,7 @@ export const askFeedback = async (
       feedbackMode,
     );
     console.log(prompt);
-    const result = await model.generateContent(prompt);
+    const result = await generateWithRetry(model, prompt);
     const feedback = result.response.text().trim();
     res.status(200).json({ feedback });
   } catch (error) {
@@ -344,7 +380,7 @@ export const askWriteEvaluation = async (
       feedbackMode,
     );
     console.log(prompt);
-    const result = await model.generateContent(prompt);
+    const result = await generateWithRetry(model, prompt);
     const feedback = result.response.text().trim();
     res.status(200).json({ feedback });
   } catch (error) {
