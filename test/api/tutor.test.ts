@@ -745,8 +745,12 @@ describe("POST /api/chat/tutor", () => {
         message: "hi",
         personality: "gentle",
       });
-    const memory = await StudentMemory.findOne({ user_id: user._id });
-    expect(memory?.tutor_personality).toBe("gentle");
+    // The controller fire-and-forgets this write (never blocks the tutor
+    // reply), so poll instead of reading once — a single read races the write.
+    await vi.waitFor(async () => {
+      const memory = await StudentMemory.findOne({ user_id: user._id });
+      expect(memory?.tutor_personality).toBe("gentle");
+    });
   });
 
   it("27. AI_DEBUG_PROMPTS logs when enabled", async () => {
