@@ -570,6 +570,89 @@ describe("POST /api/chat/tutor", () => {
     expect(finalTurn).not.toContain("should-not-appear");
   });
 
+  it("26. followup with a question blockId → question anchor tag appended", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        blockId: "q-choice-1",
+        mode: "followup",
+        message: "แล้วทรายล่ะ ทำไมไม่ใช่?",
+      });
+    const finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn.startsWith("แล้วทรายล่ะ ทำไมไม่ใช่?")).toBe(true);
+    expect(finalTurn).toContain(
+      "[คำถามที่คุยกันอยู่: ข้อใดคือวัตถุดิบของการสังเคราะห์แสง?]",
+    );
+  });
+
+  it("27. followup with unknown/absent blockId → raw message untouched", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        blockId: "__lesson_ai_assistant__",
+        mode: "followup",
+        message: "ขอ hint หน่อย",
+      });
+    const finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).toBe("ขอ hint หน่อย");
+  });
+
+  it("28. leading tutor turns dropped so contents start with a user turn", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "followup",
+        message: "โอเค เข้าใจละ",
+        clientThread: [
+          { role: "tutor", text: "ฟีดแบ็กแรกจากติวเตอร์" },
+          { role: "student", text: "ขอบคุณ" },
+          { role: "tutor", text: "ยินดีจ้า" },
+        ],
+      });
+    const contents = capturedContents()!;
+    expect(contents[0].role).toBe("user");
+    expect(contents.map((c) => c.parts[0].text)).not.toContain(
+      "ฟีดแบ็กแรกจากติวเตอร์",
+    );
+    expect(contents.map((c) => c.parts[0].text)).toContain("ขอบคุณ");
+  });
+
+  it("29. leaked internal tag in the model reply is stripped end-to-end", async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      text: [
+        "[งานของเธอตอนนี้: ให้ฟีดแบ็กคำตอบของเพื่อน]",
+        "เยี่ยมเลย! ไอเดียเรื่องต้นไม้นี่คิดได้ดีมาก",
+      ].join("\n"),
+    });
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    const res = await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "question_feedback",
+        message: "ต้นไม้",
+        questionContext: {
+          question: "วัตถุดิบคืออะไร",
+          evaluation: { level: "almost", accuracyPercent: 50 },
+        },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe(
+      "เยี่ยมเลย! ไอเดียเรื่องต้นไม้นี่คิดได้ดีมาก",
+    );
+    expect(res.body.reply).not.toContain("[งานของเธอตอนนี้");
+  });
+
   it("22. parses [SUGGESTIONS] block from AI reply", async () => {
     mockGenerateContent.mockResolvedValueOnce({
       text: [

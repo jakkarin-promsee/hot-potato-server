@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseTutorReply,
   REPORT_LABELS,
+  stripInternalTags,
   stripReportLabels,
 } from "../../src/services/tutor/parse";
 
@@ -150,5 +151,86 @@ describe("stripReportLabels (0.B parse guard)", () => {
 
     const withoutMarker = "สรุป: เก่งมากเลยวันนี้";
     expect(parseTutorReply(withoutMarker).reply).toBe("เก่งมากเลยวันนี้");
+  });
+});
+
+describe("stripInternalTags (tag-echo leak guard)", () => {
+  it("1. strips a leaked feedback task tag line at reply start", () => {
+    const raw = [
+      "[งานของเธอตอนนี้: ให้ฟีดแบ็กคำตอบของเพื่อน]",
+      "เยี่ยมเลย! ไอเดียเรื่องต้นไม้นี่คิดได้ดีมาก",
+    ].join("\n");
+    expect(stripInternalTags(raw)).toBe(
+      "เยี่ยมเลย! ไอเดียเรื่องต้นไม้นี่คิดได้ดีมาก",
+    );
+  });
+
+  it("2. strips a bolded tag sharing a line with content", () => {
+    expect(
+      stripInternalTags(
+        "**[งานของเธอตอนนี้: ให้ฟีดแบ็กคำตอบของเพื่อน]** เก่งมากเลยเพื่อน",
+      ),
+    ).toBe("เก่งมากเลยเพื่อน");
+  });
+
+  it("3. strips reading-position and followup-question tags", () => {
+    const raw = [
+      "[ตอนนี้เพื่อนกำลังอ่าน/อยู่แถวส่วนนี้ของบทเรียน: แรงเสียดทาน]",
+      "[คำถามที่คุยกันอยู่: แรงคืออะไร?]",
+      "แรงเสียดทานคือแรงต้านการเคลื่อนที่จ้า",
+    ].join("\n");
+    expect(stripInternalTags(raw)).toBe(
+      "แรงเสียดทานคือแรงต้านการเคลื่อนที่จ้า",
+    );
+  });
+
+  it("4. leaves normal bracket text untouched", () => {
+    for (const raw of [
+      "[Formula] E = mc^2 หมายถึงอะไรน่ะเหรอ?",
+      "ในบทเรียนเขียน [คำถามที่ 1] ไว้ต้นเรื่องเลยนะ",
+      "ลองดูตรง [Image] ใบไม้ ประกอบนะ",
+    ]) {
+      expect(stripInternalTags(raw)).toBe(raw);
+    }
+  });
+
+  it("5. parseTutorReply applies the guard before splitting suggestions", () => {
+    const raw = [
+      "[งานของเธอตอนนี้: ให้ฟีดแบ็กคำตอบของเพื่อน]",
+      "เยี่ยมเลย!",
+      "[SUGGESTIONS]",
+      "- ถามต่อได้ไหม?",
+    ].join("\n");
+    const result = parseTutorReply(raw);
+    expect(result.reply).toBe("เยี่ยมเลย!");
+    expect(result.suggestions).toEqual(["ถามต่อได้ไหม?"]);
+  });
+});
+
+describe("lenient [SUGGESTIONS] marker", () => {
+  it("1. bold marker **[SUGGESTIONS]** still splits", () => {
+    const raw = "คำตอบ\n**[SUGGESTIONS]**\n- คำถามต่อ?";
+    const result = parseTutorReply(raw);
+    expect(result.reply).toBe("คำตอบ");
+    expect(result.suggestions).toEqual(["คำถามต่อ?"]);
+  });
+
+  it("2. trailing colon [SUGGESTIONS]: still splits", () => {
+    const raw = "คำตอบ\n[SUGGESTIONS]:\n- คำถามต่อ?";
+    const result = parseTutorReply(raw);
+    expect(result.reply).toBe("คำตอบ");
+    expect(result.suggestions).toEqual(["คำถามต่อ?"]);
+  });
+
+  it("3. lowercase [suggestions] still splits", () => {
+    const raw = "คำตอบ\n[suggestions]\n- คำถามต่อ?";
+    const result = parseTutorReply(raw);
+    expect(result.reply).toBe("คำตอบ");
+    expect(result.suggestions).toEqual(["คำถามต่อ?"]);
+  });
+
+  it("4. marker embedded in prose is still treated as literal text", () => {
+    const raw = "คำว่า [SUGGESTIONS] โผล่ในบทเรียนได้นะ";
+    expect(parseTutorReply(raw)).toEqual({ reply: raw, suggestions: [] });
   });
 });

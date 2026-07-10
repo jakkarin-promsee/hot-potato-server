@@ -120,6 +120,63 @@ describe("serializeTiptapJsonForTest", () => {
     expect(noAlt.text).toBe("[Image]");
   });
 
+  it("formulaBlock → [Formula] latex from attrs (atom node)", () => {
+    const withLatex = serializeTiptapJsonForTest(
+      doc({
+        type: "formulaBlock",
+        attrs: { id: "f1", latex: "F = ma" },
+      }),
+    );
+    expect(withLatex.text).toBe("[Formula] F = ma");
+
+    const empty = serializeTiptapJsonForTest(
+      doc({ type: "formulaBlock", attrs: { id: "f2", latex: "" } }),
+    );
+    expect(empty.text).toBe("[Formula]");
+  });
+
+  it("youtube → [Video] src", () => {
+    const { text } = serializeTiptapJsonForTest(
+      doc({
+        type: "youtube",
+        attrs: { src: "https://www.youtube.com/watch?v=abc123" },
+      }),
+    );
+    expect(text).toBe("[Video] https://www.youtube.com/watch?v=abc123");
+  });
+
+  it("fabricCanvas → drawing placeholder", () => {
+    const { text } = serializeTiptapJsonForTest(
+      doc({ type: "fabricCanvas", attrs: { canvasData: "{...}" } }),
+    );
+    expect(text).toBe("[Drawing/diagram — visible only on the lesson page]");
+  });
+
+  it("table → one piped line per row", () => {
+    const cell = (type: string, value: string) => ({
+      type,
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: value }] },
+      ],
+    });
+    const { text } = serializeTiptapJsonForTest(
+      doc({
+        type: "table",
+        content: [
+          {
+            type: "tableRow",
+            content: [cell("tableHeader", "แรง"), cell("tableHeader", "หน่วย")],
+          },
+          {
+            type: "tableRow",
+            content: [cell("tableCell", "แรงโน้มถ่วง"), cell("tableCell", "นิวตัน")],
+          },
+        ],
+      }),
+    );
+    expect(text).toBe("| แรง | หน่วย |\n| แรงโน้มถ่วง | นิวตัน |");
+  });
+
   it("hardBreak → newline in inline text", () => {
     const { text } = serializeTiptapJsonForTest(
       doc({

@@ -167,6 +167,38 @@ function serializeBlock(
     return;
   }
 
+  if (type === "formulaBlock") {
+    // Atom node — the formula lives in attrs.latex, not in content.
+    const latex =
+      typeof node.attrs?.latex === "string" ? node.attrs.latex.trim() : "";
+    lines.push(latex ? `[Formula] ${latex}` : "[Formula]");
+    return;
+  }
+
+  if (type === "youtube") {
+    const src =
+      typeof node.attrs?.src === "string" ? node.attrs.src.trim() : "";
+    lines.push(src ? `[Video] ${src}` : "[Video]");
+    return;
+  }
+
+  if (type === "fabricCanvas") {
+    // Drawing content can't be serialized to text — leave a placeholder so
+    // the tutor at least knows a diagram exists here.
+    lines.push("[Drawing/diagram — visible only on the lesson page]");
+    return;
+  }
+
+  if (type === "table") {
+    for (const row of node.content ?? []) {
+      const cells = (row.content ?? [])
+        .map((cell) => getNodeTextContent(cell).trim())
+        .filter(Boolean);
+      if (cells.length) lines.push(`| ${cells.join(" | ")} |`);
+    }
+    return;
+  }
+
   if (type === "QuestionChoice") {
     const attrs = node.attrs ?? {};
     const blockId = typeof attrs.id === "string" ? attrs.id : "";

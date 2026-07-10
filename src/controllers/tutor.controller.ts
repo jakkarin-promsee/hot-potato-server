@@ -12,6 +12,8 @@ import { parseTutorReply } from "../services/tutor/parse";
 import {
   buildFeedbackUserTurn,
   buildSystemInstruction,
+  currentSectionTag,
+  followupQuestionTag,
 } from "../services/tutor/persona";
 import { AuthRequest } from "../types";
 
@@ -307,6 +309,10 @@ export const tutorChat = async (
     history = clientThread.map((t) => ({ role: t.role, text: t.text }));
   }
 
+  // Gemini expects the conversation to open with a user turn; a client-built
+  // thread could start with a tutor message in edge cases.
+  while (history.length && history[0].role === "tutor") history.shift();
+
   const geminiHistory = history.map((m) => ({
     role: m.role === "student" ? ("user" as const) : ("model" as const),
     text: m.text,
@@ -335,8 +341,19 @@ export const tutorChat = async (
       diagnostics: qcResult.ctx.diagnostics,
     });
   }
+  if (mode === "followup" && blockId) {
+    // A follow-up thread hangs off one question card, but the message itself
+    // is raw — anchor it so the model doesn't depend on history (which the
+    // 50-message session cap can truncate) to know which question this is.
+    const threadQuestion = lesson.questions.find(
+      (q) => q.blockId === blockId,
+    );
+    if (threadQuestion?.question) {
+      finalUserTurn += `\n\n${followupQuestionTag(threadQuestion.question)}`;
+    }
+  }
   if (currentSection) {
-    finalUserTurn += `\n\n[ตอนนี้เพื่อนกำลังอ่าน/อยู่แถวส่วนนี้ของบทเรียน: ${currentSection}]`;
+    finalUserTurn += `\n\n${currentSectionTag(currentSection)}`;
   }
 
   const model = resolveTutorModel(mode, qcResult.ctx.feedbackMode);
