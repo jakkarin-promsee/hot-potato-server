@@ -84,4 +84,15 @@ describe("buildSystemInstruction", () => {
     const sys = buildSystemInstruction({ lesson: sampleLesson });
     expect(sys).toContain("do not produce a formal verdict");
   });
+
+  it("9. format contract: light markdown allowed, labeled sections forbidden", () => {
+    const sys = buildSystemInstruction({ lesson: sampleLesson });
+    expect(sys).toContain("== FORMAT (STRICT) ==");
+    expect(sys).toContain("You may use light markdown");
+    expect(sys).toContain("NEVER use labeled sections or headers");
+    // Pin the concrete forbidden labels so a reword can't silently drop them
+    expect(sys).toContain('"Action Plan:"');
+    expect(sys).toContain('"สรุป:"');
+    expect(sys).toContain("No markdown headings (#), no tables");
+  });
 });

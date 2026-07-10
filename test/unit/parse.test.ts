@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseTutorReply } from "../../src/services/tutor/parse";
+import {
+  parseTutorReply,
+  REPORT_LABELS,
+  stripReportLabels,
+} from "../../src/services/tutor/parse";
 
 describe("parseTutorReply", () => {
   it("1. happy path — 3 suggestions", () => {
@@ -82,5 +86,69 @@ describe("parseTutorReply", () => {
     const result = parseTutorReply(raw);
     expect(result.reply).toBe("คำตอบจริง");
     expect(result.suggestions).toEqual([]);
+  });
+});
+
+describe("stripReportLabels (0.B parse guard)", () => {
+  it("1. pins the guarded label list", () => {
+    expect(REPORT_LABELS).toContain("action plan");
+    expect(REPORT_LABELS).toContain("สรุป");
+    expect(REPORT_LABELS).toContain("คำแนะนำ(?:เพิ่มเติม)?");
+  });
+
+  it("2. strips a bold label at reply start, keeps the sentence", () => {
+    expect(
+      stripReportLabels("**Action Plan:** ครั้งต่อไปลองให้เหตุผลชัดๆ นะ"),
+    ).toBe("ครั้งต่อไปลองให้เหตุผลชัดๆ นะ");
+  });
+
+  it("3. strips a plain Thai label at a paragraph start mid-reply", () => {
+    const raw = ["ชอบคำตอบเธอมากเลย", "", "สรุป: เธอเข้าใจแก่นแล้ว"].join("\n");
+    expect(stripReportLabels(raw)).toBe(
+      ["ชอบคำตอบเธอมากเลย", "", "เธอเข้าใจแก่นแล้ว"].join("\n"),
+    );
+  });
+
+  it("4. drops a label-only line entirely", () => {
+    const raw = ["**ขั้นตอนต่อไป:**", "ลองวาดรูปประกอบดูนะ"].join("\n");
+    expect(stripReportLabels(raw)).toBe("ลองวาดรูปประกอบดูนะ");
+  });
+
+  it("5. leaves legitimate mid-sentence bold untouched", () => {
+    const raw = "เรื่องนี้ **สำคัญมาก** เลยนะ ลองคิดต่อดู";
+    expect(stripReportLabels(raw)).toBe(raw);
+  });
+
+  it("6. never strips prose that merely starts with a label word (no colon)", () => {
+    for (const raw of [
+      "สรุปแล้วเธอเข้าใจถูกต้องเลย",
+      "แผนของเราคือค่อยๆ ไล่ทีละข้อ",
+      "คำแนะนำจากครูในบทเรียนก็บอกแบบนี้เหมือนกัน",
+    ]) {
+      expect(stripReportLabels(raw)).toBe(raw);
+    }
+  });
+
+  it("7. covers English variants: Next steps / Feedback / Summary", () => {
+    const raw = [
+      "Next steps: อ่านหน้า 5 ต่อ",
+      "**Feedback**: ตรงเชื่อมเหตุผลดีมาก",
+      "Summary: ครบทุกประเด็น",
+    ].join("\n");
+    expect(stripReportLabels(raw)).toBe(
+      ["อ่านหน้า 5 ต่อ", "ตรงเชื่อมเหตุผลดีมาก", "ครบทุกประเด็น"].join("\n"),
+    );
+  });
+
+  it("8. parseTutorReply applies the guard on both marker paths", () => {
+    const withMarker = [
+      "**Action Plan:** ลองใหม่อีกครั้งนะ",
+      "[SUGGESTIONS]",
+      "- ถามต่อได้ไหม?",
+    ].join("\n");
+    expect(parseTutorReply(withMarker).reply).toBe("ลองใหม่อีกครั้งนะ");
+
+    const withoutMarker = "สรุป: เก่งมากเลยวันนี้";
+    expect(parseTutorReply(withoutMarker).reply).toBe("เก่งมากเลยวันนี้");
   });
 });
