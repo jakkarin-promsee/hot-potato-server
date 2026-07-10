@@ -174,7 +174,7 @@ Login/register return `{ user, token }`; the token is a JWT signed with `JWT_SEC
 
 ## AI integration (Gemini)
 
-> **🔥 Tier 0 in progress.** Phase 0.A (2026-07-10) deleted the legacy endpoints + `chat.controller.ts`; **`POST /api/chat/tutor` is now the only AI endpoint** and every client flow uses it. Read [`../ROADMAP.md`](../ROADMAP.md) before touching AI code. Golden Rules: (1) never ration tokens; (2) anonymous full AI access (`optionalAuth` only on AI routes).
+> **✅ Tutor core shipped & owner-approved (2026-07-10).** The old roadmap's Tiers 0–3 are done: legacy endpoints + `chat.controller.ts` deleted, **`POST /api/chat/tutor` is the only AI endpoint** (SSE streaming, teacher `agent_settings`, student personalities), and the owner passed all tone gates. Read [`../ROADMAP.md`](../ROADMAP.md) (launch-readiness v3) before touching AI code. Golden Rules: (1) never ration tokens; (2) anonymous full AI access (`optionalAuth` only on AI routes).
 
 Entry point: `controllers/tutor.controller.ts` (`tutorChat`), logic in `services/tutor/*` + `services/lessonContext.service.ts`. Uses **`@google/genai`**. Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`). `generateWithRetry` (`services/tutor/retry.ts`) retries transient network errors (the owner's ISP drops connections) — **keep it** across SDK changes.
 
