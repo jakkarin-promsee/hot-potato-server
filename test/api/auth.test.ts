@@ -26,6 +26,14 @@ describe("POST /api/auth/register", () => {
     expect(res.status).toBe(400); // characterized 2026-07-09
     expect(res.body.message).toBe("Email already in use");
   });
+
+  it("2b. rejects a password shorter than 8 characters", async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ ...validUser, email: "short@test.local", password: "abc" });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Password must be at least 8 characters");
+  });
 });
 
 describe("POST /api/auth/login", () => {

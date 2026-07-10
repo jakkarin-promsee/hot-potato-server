@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { User } from "../models/user.model";
+import { Content } from "../models/content.model";
 
 export type AuthorSnapshot = {
   author_name: string;
@@ -34,4 +35,39 @@ export async function buildAuthorSnapshot(
   );
 
   return { author_name, collaborator_names };
+}
+
+/**
+ * Refresh denormalized author fields when a user renames themselves.
+ */
+export async function refreshAuthorSnapshotsForUser(
+  userId: Types.ObjectId,
+): Promise<void> {
+  const user = await User.findById(userId).select("name").lean();
+  if (!user) return;
+
+  const newName = user.name?.trim() || "Unknown";
+
+  await Content.updateMany(
+    { owner_id: userId },
+    { author_name: newName },
+  );
+
+  const collabLessons = await Content.find({ collaborators: userId })
+    .select("owner_id collaborators")
+    .lean();
+
+  for (const lesson of collabLessons) {
+    const snapshot = await buildAuthorSnapshot(
+      lesson.owner_id as Types.ObjectId,
+      (lesson.collaborators ?? []) as Types.ObjectId[],
+    );
+    await Content.updateOne(
+      { _id: lesson._id },
+      {
+        author_name: snapshot.author_name,
+        collaborator_names: snapshot.collaborator_names,
+      },
+    );
+  }
 }

@@ -37,7 +37,7 @@ server/test/
 ├── fixtures/lesson.json  # committed lesson fixture (re-export from real DB via scripts/export-fixture.ts)
 ├── helpers/seed.ts
 ├── unit/                 # prompt builders, retry logic, lessonContext serializer
-├── api/                  # auth, content, answers, tutor, memory, rateLimit (supertest)
+├── api/                  # auth, content, answers, tutor, memory, rateLimit, profile (supertest)
 └── ai/                   # live Gemini smoke (*.ai.test.ts, excluded from npm test)
 ```
 
@@ -85,7 +85,7 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 ### `/api/auth` — `auth.controller.ts`
 | Method | Path | Guard | Purpose |
 | --- | --- | --- | --- |
-| POST | `/register` | 🌐 | Create account → `{ user, token }` |
+| POST | `/register` | 🌐 | Create account → `{ user, token }` (password ≥ 8 chars, same floor as change-password) |
 | POST | `/login` | 🌐 | Log in → `{ user, token }` |
 | GET | `/recheck` | 🔒 | Re-validate token, return fresh user |
 | PUT | `/change-password` | 🔒 | Change password |
@@ -128,7 +128,12 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 **Note:** `/memory` is the only protected chat route — AI usage itself stays open (`optionalAuth` on `/tutor`). The legacy `/ask`, `/feedback`, `/write-evaluate` endpoints and `chat.controller.ts` were **deleted in Tier 0 Phase 0.A** (2026-07-10); every client flow now calls `/tutor`.
 
 ### `/api/users` — `user.controller.ts`
-`GET /` 🔒 (list) · `POST /` 🌐 (create). `restrictTo(...roles)` exists for role-gating but is lightly used.
+| Method | Path | Guard | Purpose |
+| --- | --- | --- | --- |
+| GET | `/me/profile` | 🔒 | Read account + profile (`user` + flattened `profile`) |
+| PUT | `/me/profile` | 🔒 | Update `name`, `avatar`, `bio`, `nickname` (partial OK; rename propagates author snapshots) |
+| GET | `/` | 🔒 | List all users (Tier 3.A cleanup target) |
+| POST | `/` | 🌐 | Create user (scaffolding) |
 
 ### `/api/status` — `status.controller.ts`
 `GET /` 🔒 (uptime/memory/platform) · `GET /database` 🌐 · `GET /env` 🌐 · `GET /all` 🌐 — health/diagnostics.
@@ -223,6 +228,6 @@ If `MONGO_URI` is bad the process **exits on boot** (`index.ts`). If `GEMINI_API
 - **Render cold starts.** Free tier sleeps; first request after idle is slow, on top of normal AI latency. The client must show loading states — don't treat slowness as failure.
 - **`/api/chat/*` uses `optionalAuth` + bot-only rate limiting (Golden Rules 1 & 2).** Anonymous students *must* keep full AI access — `optionalAuth` only, never `protect`. Rate limits are keyed by IP (or user id when logged in) with generous env-tunable defaults (`AI_RATELIMIT_PER_10MIN=60`, `AI_RATELIMIT_PER_DAY=1000`). `app.set("trust proxy", 1)` ensures real client IPs behind Render's proxy.
 - **Optimistic concurrency on content update.** `PUT /content/:id` compares `clientUpdatedAt` to the server's `updatedAt` and returns **409** if the server copy is newer. The client must send `clientUpdatedAt` and handle conflicts.
-- **Denormalized author fields.** `author_name` / `collaborator_names` are recomputed via `contentAuthorSnapshot.service.ts` on create and when `collaborators` changes — `updateContent` deliberately drops client-sent values for these. If a user renames themselves, existing content's `author_name` won't auto-update.
+- **Denormalized author fields.** `author_name` / `collaborator_names` are recomputed via `contentAuthorSnapshot.service.ts` on create and when `collaborators` changes — `updateContent` deliberately drops client-sent values for these. **Renames propagate** via `refreshAuthorSnapshotsForUser()` when a user updates their display name through `PUT /api/users/me/profile` (Tier 2.A).
 - **CORS is wide open** (`app.use(cors())`). Lock down origins before any real production hardening.
 - **`schema.md` is stale.** It predates several models/fields. The `.model.ts` files are authoritative.

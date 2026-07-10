@@ -17,6 +17,11 @@ const generateToken = (id: string) => {
 export const register = async (req: Request, res: Response): Promise<void> => {
   const { name, email, password, role } = req.body;
 
+  if (typeof password !== "string" || password.length < 8) {
+    res.status(400).json({ message: "Password must be at least 8 characters" });
+    return;
+  }
+
   const existingUser = await User.findOne({ email });
   if (existingUser) {
     res.status(400).json({ message: "Email already in use" });
