@@ -64,6 +64,7 @@ server/src/
 │   ├── contentAuthorSnapshot.service.ts   # denormalized author_name / collaborator_names
 │   ├── learningHistory.service.ts         # touchLearningHistory(user, content)
 │   ├── lessonContext.service.ts           # load + serialize lesson from tiptap_json (cached)
+│   ├── observability.service.ts           # in-memory error ring buffer + AI health (Tier 1.A; wiped on restart — by design)
 │   └── tutor/                             # unified tutor agent (Phase 1+)
 │       ├── genaiClient.ts                 # callTutorModel + callTutorModelStream
 │       ├── parse.ts                       # parseTutorReply + createSuggestionsGate
@@ -140,7 +141,7 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 | GET | `/` | 🔒 admin | Server uptime, memory, platform (internals) |
 | GET | `/database` | 🌐 | MongoDB connection state (no host/port/db name) |
 | GET | `/env` | 🌐 | Required env var presence only (accepted risk: var names are public in repo docs) |
-| GET | `/all` | 🌐 | Aggregated health check (sanitized; anonymous Status page uses this) |
+| GET | `/all` | 🌐 | Aggregated health check (sanitized; anonymous Status page uses this; includes `ai` health + `errors` ring buffer since Tier 1.A) |
 
 ## Data model
 
@@ -234,6 +235,7 @@ If `MONGO_URI` is bad the process **exits on boot** (`index.ts`). If `GEMINI_API
 ## Gotchas
 
 - **Render cold starts.** Free tier sleeps; first request after idle is slow, on top of normal AI latency. The client must show loading states — don't treat slowness as failure.
+- **Observability is in-memory.** The error ring buffer + AI health on `/status/all` reset on every restart (Render free tier restarts often). Never store `err.message` or request bodies in it — names/routes/codes only, and names are admin-only.
 - **`/api/chat/*` uses `optionalAuth` + bot-only rate limiting (Golden Rules 1 & 2).** Anonymous students *must* keep full AI access — `optionalAuth` only, never `protect`. Rate limits are keyed by IP (or user id when logged in) with generous env-tunable defaults (`AI_RATELIMIT_PER_10MIN=60`, `AI_RATELIMIT_PER_DAY=1000`). `app.set("trust proxy", 1)` ensures real client IPs behind Render's proxy.
 - **Optimistic concurrency on content update.** `PUT /content/:id` compares `clientUpdatedAt` to the server's `updatedAt` and returns **409** if the server copy is newer. The client must send `clientUpdatedAt` and handle conflicts.
 - **Denormalized author fields.** `author_name` / `collaborator_names` are recomputed via `contentAuthorSnapshot.service.ts` on create and when `collaborators` changes — `updateContent` deliberately drops client-sent values for these. **Renames propagate** via `refreshAuthorSnapshotsForUser()` when a user updates their display name through `PUT /api/users/me/profile` (Tier 2.A).

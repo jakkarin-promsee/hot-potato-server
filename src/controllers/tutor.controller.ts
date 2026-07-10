@@ -3,6 +3,7 @@ import mongoose, { Types } from "mongoose";
 import { ChatSession } from "../models/chat_session.model";
 import { StudentMemory } from "../models/student_memory.model";
 import { getLessonContext } from "../services/lessonContext.service";
+import { recordServerError } from "../services/observability.service";
 import { callTutorModel, callTutorModelStream } from "../services/tutor/genaiClient";
 import {
   buildMemoryDigest,
@@ -481,6 +482,12 @@ export const tutorChat = async (
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg === "MISSING_GEMINI_API_KEY") {
+        recordServerError({
+          method: req.method,
+          route: req.originalUrl ?? "/api/chat/tutor",
+          status: 500,
+          name: "MISSING_GEMINI_API_KEY",
+        });
         if (!clientGone) {
           send("error", { message: "Missing GEMINI_API_KEY in server env" });
         }
@@ -488,6 +495,12 @@ export const tutorChat = async (
         return;
       }
       console.error("Tutor stream failed:", error);
+      recordServerError({
+        method: req.method,
+        route: req.originalUrl ?? "/api/chat/tutor",
+        status: 502,
+        name: error instanceof Error ? error.name : "Error",
+      });
       if (!clientGone) send("error", { message: "AI request failed" });
       res.end();
       return;
@@ -528,12 +541,24 @@ export const tutorChat = async (
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     if (msg === "MISSING_GEMINI_API_KEY") {
+      recordServerError({
+        method: req.method,
+        route: req.originalUrl ?? "/api/chat/tutor",
+        status: 500,
+        name: "MISSING_GEMINI_API_KEY",
+      });
       res
         .status(500)
         .json({ message: "Missing GEMINI_API_KEY in server env" });
       return;
     }
     console.error("Tutor AI request failed:", error);
+    recordServerError({
+      method: req.method,
+      route: req.originalUrl ?? "/api/chat/tutor",
+      status: 502,
+      name: error instanceof Error ? error.name : "Error",
+    });
     res.status(502).json({ message: "AI request failed" });
   }
 };

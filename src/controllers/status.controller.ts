@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
 import os from "os";
+import {
+  getAiHealth,
+  getErrorSummary,
+  getErrorSummaryDetailed,
+} from "../services/observability.service";
 
 // ─── Required env vars to validate ────────────────────────────────────────────
 const REQUIRED_ENV_VARS = ["PORT", "MONGO_URI", "JWT_SECRET", "JWT_EXPIRES_IN"];
@@ -37,6 +42,8 @@ export const getServerStatus = (_req: Request, res: Response): void => {
     },
     platform: os.platform(),
     hostname: os.hostname(),
+    ai: getAiHealth(),
+    errors: getErrorSummaryDetailed(),
   });
 };
 
@@ -88,6 +95,9 @@ export const getAllStatus = (_req: Request, res: Response): void => {
   }));
   const envOk = envChecks.every((c) => c.loaded);
 
+  // Overall status stays server+db+env only: one failed AI call or a recorded
+  // error is information, not an outage — the AI card carries its own badge,
+  // and uptime probes keep the stable 200/503 contract.
   const overallOk = serverOk && dbOk && envOk;
 
   res.status(overallOk ? 200 : 503).json({
@@ -107,6 +117,8 @@ export const getAllStatus = (_req: Request, res: Response): void => {
         status: envOk ? "ok" : "error",
         variables: envChecks,
       },
+      ai: getAiHealth(),
+      errors: getErrorSummary(),
     },
   });
 };
