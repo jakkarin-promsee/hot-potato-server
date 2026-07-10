@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import request from "supertest";
 import app from "../../src/app";
-import { loadLessonFixture } from "../helpers/seed";
+import { loadLessonFixture, seedLesson, seedUser } from "../helpers/seed";
 
 // Gated: costs real Gemini tokens. Runs only under `npm run test:ai` with a
 // real key present (never with the placeholder key from test/setup.ts).
@@ -50,5 +50,23 @@ describeLive("live Gemini smoke tests", () => {
     expect(res.status).toBe(200);
     expect(res.body.feedback.length).toBeGreaterThan(20);
     expect(THAI.test(res.body.feedback)).toBe(true);
+  });
+
+  it("3. /chat/tutor free_chat returns non-empty Thai reply on fixture lesson", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    const res = await request(app).post("/api/chat/tutor").send({
+      contentId: lesson._id.toString(),
+      mode: "free_chat",
+      message: "ช่วยอธิบายการสังเคราะห์แสงแบบสั้นๆ หน่อย",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.reply.length).toBeGreaterThan(20);
+    expect(THAI.test(res.body.reply)).toBe(true);
+    // Log suggestions presence — model may occasionally miss the format.
+    console.log(
+      `[live tutor] suggestions parsed: ${res.body.suggestions?.length ?? 0}`,
+      res.body.suggestions,
+    );
   });
 });

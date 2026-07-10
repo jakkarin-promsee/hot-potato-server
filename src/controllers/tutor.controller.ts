@@ -3,12 +3,29 @@ import mongoose, { Types } from "mongoose";
 import { ChatSession } from "../models/chat_session.model";
 import { getLessonContext } from "../services/lessonContext.service";
 import { callTutorModel } from "../services/tutor/genaiClient";
+import { parseTutorReply } from "../services/tutor/parse";
 import {
   buildFeedbackUserTurn,
   buildSystemInstruction,
-  parseTutorReply,
 } from "../services/tutor/persona";
 import { AuthRequest } from "../types";
+
+export function getFastModel(): string {
+  return (process.env.AI_FAST_MODEL || "gemini-2.5-flash-lite").trim();
+}
+
+export function getTutorModel(): string {
+  return (
+    process.env.AI_TUTOR_MODEL ||
+    process.env.AI_HEAVY_MODEL ||
+    "gemini-2.5-flash"
+  ).trim();
+}
+
+/** @deprecated Use getFastModel() / getTutorModel() — kept for imports that read defaults at load time. */
+export const FAST_MODEL = getFastModel();
+/** @deprecated Use getTutorModel() */
+export const TUTOR_MODEL = getTutorModel();
 
 const TUTOR_MODES = [
   "free_chat",
@@ -156,6 +173,16 @@ function parseQuestionContext(
   };
 }
 
+export function resolveTutorModel(
+  mode: TutorMode,
+  feedbackMode: FeedbackMode = "quick_check",
+): string {
+  if (mode === "question_feedback" && feedbackMode === "quick_check") {
+    return getFastModel();
+  }
+  return getTutorModel();
+}
+
 function checkContentAccess(
   lesson: {
     accessType: "public" | "link-only" | "private";
@@ -283,7 +310,7 @@ export const tutorChat = async (
     });
   }
 
-  const model = (process.env.AI_TUTOR_MODEL ?? "gemini-2.5-flash-lite").trim();
+  const model = resolveTutorModel(mode, qcResult.ctx.feedbackMode);
 
   try {
     const raw = await callTutorModel({

@@ -21,6 +21,7 @@ import { clearLessonContextCache } from "../../src/services/lessonContext.servic
 import { seedLesson, seedUser } from "../helpers/seed";
 
 interface GenerateContentArg {
+  model?: string;
   contents?: { role: string; parts: { text: string }[] }[];
   config?: { systemInstruction?: string };
 }
@@ -29,6 +30,10 @@ function capturedCall(): GenerateContentArg | undefined {
   return mockGenerateContent.mock.calls.at(-1)?.[0] as
     | GenerateContentArg
     | undefined;
+}
+
+function capturedModel(): string {
+  return capturedCall()?.model ?? "";
 }
 
 function capturedContents(): GenerateContentArg["contents"] {
@@ -336,7 +341,7 @@ describe("POST /api/chat/tutor", () => {
     expect(finalTurn).not.toMatch(/level=/);
   });
 
-  it("16. systemInstruction contains title, fixture phrase, guide answer", async () => {
+  it("16. systemInstruction contains title, fixture phrase, guide answer, persona", async () => {
     const { user } = await seedUser();
     const lesson = await seedLesson(user._id, { access_type: "public" });
     await request(app)
@@ -350,6 +355,9 @@ describe("POST /api/chat/tutor", () => {
     expect(sys).toContain("การสังเคราะห์แสง (Photosynthesis)");
     expect(sys).toContain("ปอดของโลก");
     expect(sys).toContain("น้ำ | คาร์บอนไดออกไซด์");
+    expect(sys).toContain("น้องมันฝรั่ง");
+    expect(sys).toContain("== YOUR CHARACTER ==");
+    expect(sys).toContain("[SUGGESTIONS]");
   });
 
   it("17. mock rejects non-transient → 502", async () => {
@@ -374,5 +382,97 @@ describe("POST /api/chat/tutor", () => {
       .send({ contentId: missing, mode: "free_chat", message: "hi" });
     expect(res.status).toBe(404);
     expect(res.body.message).toBe("Content not found");
+  });
+
+  it("19. free_chat uses TUTOR_MODEL", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "สวัสดี",
+      });
+    expect(capturedModel()).toBe(
+      (process.env.AI_TUTOR_MODEL ||
+        process.env.AI_HEAVY_MODEL ||
+        "gemini-2.5-flash").trim(),
+    );
+  });
+
+  it("20. question_feedback quick_check uses FAST_MODEL", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "question_feedback",
+        message: "น้ำและ CO2",
+        questionContext: {
+          question: "วัตถุดิบคืออะไร",
+          guideAnswer: "น้ำ | CO2",
+          evaluation: { level: "correct", accuracyPercent: 100 },
+          feedbackMode: "quick_check",
+        },
+      });
+    expect(capturedModel()).toBe(
+      (process.env.AI_FAST_MODEL || "gemini-2.5-flash-lite").trim(),
+    );
+  });
+
+  it("21. question_feedback full_reflection uses TUTOR_MODEL", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "question_feedback",
+        message: "พืชสำคัญเพราะผลิตออกซิเจน",
+        questionContext: {
+          question: "ทำไมพืชสำคัญ",
+          guideAnswer: "ผลิตออกซิเจน",
+          evaluation: { level: "almost", accuracyPercent: 70 },
+          feedbackMode: "full_reflection",
+        },
+      });
+    expect(capturedModel()).toBe(
+      (process.env.AI_TUTOR_MODEL ||
+        process.env.AI_HEAVY_MODEL ||
+        "gemini-2.5-flash").trim(),
+    );
+  });
+
+  it("22. parses [SUGGESTIONS] block from AI reply", async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      text: [
+        "เยี่ยมเลย! ตรงที่เธอเชื่อมแสงกับอาหารนี่คิดได้ดีมาก",
+        "",
+        "[SUGGESTIONS]",
+        "- แล้วน้ำมีบทบาทยังไง?",
+        "- ทำไมต้องมีคลอโรฟิลล์?",
+        "- ถ้าไม่มีแสงจะเกิดอะไรขึ้น?",
+      ].join("\n"),
+    });
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    const res = await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "อธิบายการสังเคราะห์แสง",
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe(
+      "เยี่ยมเลย! ตรงที่เธอเชื่อมแสงกับอาหารนี่คิดได้ดีมาก",
+    );
+    expect(res.body.suggestions).toEqual([
+      "แล้วน้ำมีบทบาทยังไง?",
+      "ทำไมต้องมีคลอโรฟิลล์?",
+      "ถ้าไม่มีแสงจะเกิดอะไรขึ้น?",
+    ]);
   });
 });

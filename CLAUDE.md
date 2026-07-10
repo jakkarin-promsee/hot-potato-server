@@ -66,7 +66,8 @@ server/src/
 │   ├── lessonContext.service.ts           # load + serialize lesson from tiptap_json (cached)
 │   └── tutor/                             # unified tutor agent (Phase 1+)
 │       ├── genaiClient.ts                 # callTutorModel — multi-turn Gemini wrapper
-│       ├── persona.ts                     # buildSystemInstruction + parseTutorReply
+│       ├── parse.ts                       # parseTutorReply — [SUGGESTIONS] block parser (Phase 2)
+│       ├── persona.ts                     # buildSystemInstruction + TUTOR_NAME (Phase 2 persona)
 │       └── retry.ts                       # isTransientAIError + generateWithRetry
 ├── types/index.ts          # AuthRequest (Express Request + .user)
 └── models/schema.md        # OLDER hand sketch of the model — trust the .model.ts files
@@ -171,7 +172,9 @@ All in `controllers/chat.controller.ts`. Uses **`@google/genai`** (unified SDK; 
 
 `feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The prompts enforce a warm, never-shaming tone and end with one actionable next step — **preserve that intent when editing prompts.**
 
-Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_TUTOR_MODEL` (tutor endpoint, default `gemini-2.5-flash-lite`), `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` (override the write-eval model), `AI_DEBUG_PROMPTS` (`true` to log full prompts — default off), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000).
+Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_FAST_MODEL` (quick_check feedback, default `gemini-2.5-flash-lite`), `AI_TUTOR_MODEL` (free chat / reflection / write-eval, default `gemini-2.5-flash`; legacy alias `AI_HEAVY_MODEL`; override to `gemini-3.5-flash` when available), `AI_WRITE_EVAL_MODEL` (legacy write-eval override), `AI_DEBUG_PROMPTS` (`true` to log full prompts — default off), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000).
+
+**Prompt iteration:** edit persona text in `src/services/tutor/persona.ts`; log changes in [`prompt-notes.md`](prompt-notes.md) (date / what felt off / fix).
 
 ## Conventions
 
@@ -194,7 +197,9 @@ Create `server/.env` (git-ignored). See [`README.md`](README.md) for description
 | `CLOUDINARY_CLOUD_NAME` | yes | Cloudinary account |
 | `CLOUDINARY_UPLOAD_PRESET` | yes | Cloudinary unsigned preset |
 | `AI_OUTPUT_LANGUAGE` | no | `thai` (default) or `english` |
-| `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` | no | Override write-eval model |
+| `AI_FAST_MODEL` | no | Quick-check feedback model (default `gemini-2.5-flash-lite`) |
+| `AI_TUTOR_MODEL` | no | Free chat / reflection / write-eval tutor model (default `gemini-2.5-flash`; set `gemini-3.5-flash` or `gemini-3-flash-preview` for newer 3-series) |
+| `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` | no | Legacy aliases — override tutor or write-eval model |
 | `AI_DEBUG_PROMPTS` | no | `true` to log full AI prompts (default off) |
 | `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` | no | Bot-only rate limits per IP/user (defaults `60` / `1000`) |
 
