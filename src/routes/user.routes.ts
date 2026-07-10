@@ -1,7 +1,6 @@
 import { Router } from "express";
 import {
   getUsers,
-  createUser,
   getMyProfile,
   updateMyProfile,
 } from "../controllers/user.controller";
@@ -12,7 +11,6 @@ const router = Router();
 router.get("/me/profile", protect, getMyProfile);
 router.put("/me/profile", protect, updateMyProfile);
 
-router.get("/", protect, getUsers);
-router.post("/", createUser);
+router.get("/", protect, restrictTo("admin"), getUsers);
 
 export default router;

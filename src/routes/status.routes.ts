@@ -5,12 +5,12 @@ import {
   getEnvStatus,
   getServerStatus,
 } from "../controllers/status.controller";
-import { protect } from "../middlewares/auth.middleware";
+import { protect, restrictTo } from "../middlewares/auth.middleware";
 
 const router = Router();
 
-// GET /api/status/          → server uptime, memory, platform info
-router.get("/", protect, getServerStatus);
+// GET /api/status/          → server uptime, memory, platform info (admin only)
+router.get("/", protect, restrictTo("admin"), getServerStatus);
 
 // GET /api/status/database  → MongoDB connection state
 router.get("/database", getDatabaseStatus);

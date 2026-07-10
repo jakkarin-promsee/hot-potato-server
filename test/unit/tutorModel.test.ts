@@ -20,7 +20,7 @@ describe("resolveTutorModel", () => {
   it("1. free_chat → TUTOR_MODEL default", () => {
     delete process.env.AI_TUTOR_MODEL;
     delete process.env.AI_HEAVY_MODEL;
-    expect(resolveTutorModel("free_chat")).toBe("gemini-2.5-flash");
+    expect(resolveTutorModel("free_chat")).toBe("gemini-3.5-flash");
   });
 
   it("2. followup → TUTOR_MODEL", () => {

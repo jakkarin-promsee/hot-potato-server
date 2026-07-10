@@ -35,7 +35,9 @@ CLOUDINARY_UPLOAD_PRESET=your-unsigned-preset
 
 # Optional
 AI_OUTPUT_LANGUAGE=thai          # or "english" (default: thai)
-# AI_WRITE_EVAL_MODEL=gemini-2.5-flash   # override the write-evaluation model
+CORS_ORIGINS=http://localhost:5173   # comma-separated; unset = wide open (dev OK)
+# AI_TUTOR_MODEL=gemini-3.5-flash    # default since Tier 3.B (2026-07-10)
+# AI_FAST_MODEL=gemini-2.5-flash-lite
 ```
 
 | Variable | Required | Description |
@@ -48,7 +50,11 @@ AI_OUTPUT_LANGUAGE=thai          # or "english" (default: thai)
 | `CLOUDINARY_CLOUD_NAME` | yes | Cloudinary account name |
 | `CLOUDINARY_UPLOAD_PRESET` | yes | Cloudinary unsigned upload preset |
 | `AI_OUTPUT_LANGUAGE` | no | AI response language: `thai` (default) or `english` |
-| `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` | no | Override the model used for open-ended answer evaluation |
+| `AI_FAST_MODEL` | no | Quick-check + memory model (default `gemini-2.5-flash-lite`) |
+| `AI_TUTOR_MODEL` | no | Tutor model for free chat / reflection / write-eval (default `gemini-3.5-flash`) |
+| `AI_HEAVY_MODEL` | no | Legacy alias for `AI_TUTOR_MODEL` |
+| `CORS_ORIGINS` | no | Comma-separated browser origins; unset = fail-open with boot warning |
+| `AUTH_RATELIMIT_PER_10MIN` | no | Bot guard on login/register (default `100`) |
 
 ## Run
 
@@ -73,8 +79,8 @@ All app endpoints are under `/api`. Authentication is a JWT `Bearer` token (obta
 | Categories | `/api/categories` | image-library folders |
 | Images | `/api/images` | Cloudinary image library |
 | Chat (AI) | `/api/chat` | learning Q&A, answer feedback, write evaluation |
-| Users | `/api/users` | user list / create |
-| Status | `/api/status` | health & diagnostics |
+| Users | `/api/users` | profile + admin user list |
+| Status | `/api/status` | health & diagnostics (some routes admin-only) |
 
 See [`CLAUDE.md`](CLAUDE.md) for the full per-endpoint reference, guards, and request/response shapes.
 
@@ -104,5 +110,5 @@ server/src/
 
 ## Notes
 
-- No automated tests yet.
+- Tests: `npm test` (offline, in-memory Mongo). Live AI smoke: `npm run test:ai`. Model probe: `npm run check-models`. Promote admin: `npm run promote -- <email>`.
 - `models/schema.md` is an early hand-drawn sketch and is now out of date — the `*.model.ts` files are authoritative.

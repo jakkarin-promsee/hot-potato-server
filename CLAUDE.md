@@ -85,8 +85,8 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 ### `/api/auth` — `auth.controller.ts`
 | Method | Path | Guard | Purpose |
 | --- | --- | --- | --- |
-| POST | `/register` | 🌐 | Create account → `{ user, token }` (password ≥ 8 chars, same floor as change-password) |
-| POST | `/login` | 🌐 | Log in → `{ user, token }` |
+| POST | `/register` | 🌐 + auth rate limit | Create account → `{ user, token }` (always `learner`; `role` in body ignored; password ≥ 8) |
+| POST | `/login` | 🌐 + auth rate limit | Log in → `{ user, token }` |
 | GET | `/recheck` | 🔒 | Re-validate token, return fresh user |
 | PUT | `/change-password` | 🔒 | Change password |
 
@@ -132,11 +132,15 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 | --- | --- | --- | --- |
 | GET | `/me/profile` | 🔒 | Read account + profile (`user` + flattened `profile`) |
 | PUT | `/me/profile` | 🔒 | Update `name`, `avatar`, `bio`, `nickname` (partial OK; rename propagates author snapshots) |
-| GET | `/` | 🔒 | List all users (Tier 3.A cleanup target) |
-| POST | `/` | 🌐 | Create user (scaffolding) |
+| GET | `/` | 🔒 admin | List all users (password hashes excluded) |
 
 ### `/api/status` — `status.controller.ts`
-`GET /` 🔒 (uptime/memory/platform) · `GET /database` 🌐 · `GET /env` 🌐 · `GET /all` 🌐 — health/diagnostics.
+| Method | Path | Guard | Purpose |
+| --- | --- | --- | --- |
+| GET | `/` | 🔒 admin | Server uptime, memory, platform (internals) |
+| GET | `/database` | 🌐 | MongoDB connection state (no host/port/db name) |
+| GET | `/env` | 🌐 | Required env var presence only (accepted risk: var names are public in repo docs) |
+| GET | `/all` | 🌐 | Aggregated health check (sanitized; anonymous Status page uses this) |
 
 ## Data model
 
@@ -160,9 +164,11 @@ Defined in `models/*.model.ts`. Mongoose `timestamps` add `createdAt`/`updatedAt
 
 `middlewares/auth.middleware.ts`:
 
-- **`protect`** — requires `Authorization: Bearer <jwt>`, verifies with `JWT_SECRET`, loads the user (minus password) onto `req.user`. On any failure it returns **401 with a structured body**: `{ message, code, forceRelogin: true, clearToken: true }` where `code` ∈ `TOKEN_MISSING | TOKEN_EXPIRED | TOKEN_INVALID | USER_NOT_FOUND`. **The client relies on this exact shape** to auto-logout — don't change it without updating `client/src/lib/axios.ts`.
-- **`optionalAuth`** — sets `req.user` if a valid token is present, otherwise continues anonymously. Used by public-readable content endpoints.
+- **`protect`** — requires `Authorization: Bearer <jwt>`, verifies with `JWT_SECRET`, loads the user (minus password) onto `req.user`. Rejects non-`active` accounts with **401** `ACCOUNT_INACTIVE` (same structured body). On any other failure it returns **401 with a structured body**: `{ message, code, forceRelogin: true, clearToken: true }` where `code` ∈ `TOKEN_MISSING | TOKEN_EXPIRED | TOKEN_INVALID | USER_NOT_FOUND | ACCOUNT_INACTIVE`. **The client relies on this exact shape** to auto-logout — don't change it without updating `client/src/lib/axios.ts`.
+- **`optionalAuth`** — sets `req.user` only for **active** users when a valid token is present; blocked/suspended tokens degrade to anonymous (Golden Rule 2). Used by public-readable content and AI endpoints.
 - **`restrictTo(...roles)`** — role guard, use *after* `protect`.
+
+**Roles (Tier 3.A decision):** `admin` gates diagnostics (`GET /api/users`, `GET /api/status/`). `creator` and `learner` are cosmetic for now — any logged-in user can create lessons (intentional for friendly-users launch). Registration always produces `learner`; promote via `npm run promote -- <email>`.
 
 Login/register return `{ user, token }`; the token is a JWT signed with `JWT_SECRET` and `JWT_EXPIRES_IN`. `req.user` typing comes from `AuthRequest` in `types/index.ts`.
 
@@ -188,9 +194,9 @@ Entry point: `controllers/tutor.controller.ts` (`tutorChat`), logic in `services
 
 **Response:** `{ reply, suggestions[], sessionId }` — `parseTutorReply` (`services/tutor/parse.ts`) splits the `[SUGGESTIONS]` block into up to 3 chips.
 
-**Model routing** (`resolveTutorModel`): `question_feedback` + `quick_check` → `AI_FAST_MODEL`; everything else → `AI_TUTOR_MODEL`. Persona lives in `services/tutor/persona.ts` (`buildSystemInstruction` — character, teach rules, the intent rule gating evaluation on the feedback tag, length rules, `[SUGGESTIONS]` contract, lesson + questions). `feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The persona enforces a warm, never-shaming tone — **preserve that intent when editing prompts**, and log every change in [`prompt-notes.md`](prompt-notes.md).
+**Model routing** (`resolveTutorModel`): `question_feedback` + `quick_check` → `getFastModel()`; everything else → `getTutorModel()`. Defaults live in `services/tutor/models.ts` (single source of truth). Persona lives in `services/tutor/persona.ts` (`buildSystemInstruction` — character, teach rules, the intent rule gating evaluation on the feedback tag, length rules, `[SUGGESTIONS]` contract, lesson + questions). `feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The persona enforces a warm, never-shaming tone — **preserve that intent when editing prompts**, and log every change in [`prompt-notes.md`](prompt-notes.md).
 
-Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_FAST_MODEL` (quick_check feedback + memory updates, default `gemini-2.5-flash-lite`), `AI_TUTOR_MODEL` (free chat / reflection / write-eval, default `gemini-2.5-flash`; legacy alias `AI_HEAVY_MODEL`; override to `gemini-3.5-flash` when available), `AI_MEMORY_EVERY_N_TURNS` (logged-in memory update cadence, default `3`), `AI_WRITE_EVAL_MODEL` (legacy write-eval override), `AI_DEBUG_PROMPTS` (`true` to log full prompts — default off), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000).
+Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_FAST_MODEL` (quick_check feedback + memory updates, default `gemini-2.5-flash-lite`), `AI_TUTOR_MODEL` (free chat / reflection / write-eval, default `gemini-3.5-flash`; legacy alias `AI_HEAVY_MODEL`), `AI_MEMORY_EVERY_N_TURNS` (logged-in memory update cadence, default `3`), `AI_DEBUG_PROMPTS` (`true` logs system instruction + final user turn — **dev-only, never production**), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000), `AUTH_RATELIMIT_PER_10MIN` (bot guard on `/auth/login` + `/register`, default 100).
 
 **Prompt iteration:** edit persona text in `src/services/tutor/persona.ts`; log changes in [`prompt-notes.md`](prompt-notes.md) (date / what felt off / fix).
 
@@ -215,11 +221,13 @@ Create `server/.env` (git-ignored). See [`README.md`](README.md) for description
 | `CLOUDINARY_CLOUD_NAME` | yes | Cloudinary account |
 | `CLOUDINARY_UPLOAD_PRESET` | yes | Cloudinary unsigned preset |
 | `AI_OUTPUT_LANGUAGE` | no | `thai` (default) or `english` |
-| `AI_FAST_MODEL` | no | Quick-check feedback model (default `gemini-2.5-flash-lite`) |
-| `AI_TUTOR_MODEL` | no | Free chat / reflection / write-eval tutor model (default `gemini-2.5-flash`; set `gemini-3.5-flash` or `gemini-3-flash-preview` for newer 3-series) |
-| `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` | no | Legacy aliases — override tutor or write-eval model |
-| `AI_DEBUG_PROMPTS` | no | `true` to log full AI prompts (default off) |
-| `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` | no | Bot-only rate limits per IP/user (defaults `60` / `1000`) |
+| `AI_FAST_MODEL` | no | Quick-check feedback + memory model (default `gemini-2.5-flash-lite`) |
+| `AI_TUTOR_MODEL` | no | Free chat / reflection / write-eval model (default `gemini-3.5-flash`) |
+| `AI_HEAVY_MODEL` | no | Legacy alias for `AI_TUTOR_MODEL` |
+| `AI_DEBUG_PROMPTS` | no | `true` logs system instruction + final user turn (dev-only — logs student messages) |
+| `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` | no | Bot-only rate limits on `/api/chat/*` (defaults `60` / `1000`) |
+| `AUTH_RATELIMIT_PER_10MIN` | no | Bot guard on login/register per IP (default `100`) |
+| `CORS_ORIGINS` | no | Comma-separated allowed origins (e.g. `https://app.vercel.app,http://localhost:5173`). **Unset → wide open** with boot warning in `index.ts`. |
 
 If `MONGO_URI` is bad the process **exits on boot** (`index.ts`). If `GEMINI_API_KEY` is missing, chat endpoints return 500 with a clear message.
 
@@ -229,5 +237,6 @@ If `MONGO_URI` is bad the process **exits on boot** (`index.ts`). If `GEMINI_API
 - **`/api/chat/*` uses `optionalAuth` + bot-only rate limiting (Golden Rules 1 & 2).** Anonymous students *must* keep full AI access — `optionalAuth` only, never `protect`. Rate limits are keyed by IP (or user id when logged in) with generous env-tunable defaults (`AI_RATELIMIT_PER_10MIN=60`, `AI_RATELIMIT_PER_DAY=1000`). `app.set("trust proxy", 1)` ensures real client IPs behind Render's proxy.
 - **Optimistic concurrency on content update.** `PUT /content/:id` compares `clientUpdatedAt` to the server's `updatedAt` and returns **409** if the server copy is newer. The client must send `clientUpdatedAt` and handle conflicts.
 - **Denormalized author fields.** `author_name` / `collaborator_names` are recomputed via `contentAuthorSnapshot.service.ts` on create and when `collaborators` changes — `updateContent` deliberately drops client-sent values for these. **Renames propagate** via `refreshAuthorSnapshotsForUser()` when a user updates their display name through `PUT /api/users/me/profile` (Tier 2.A).
-- **CORS is wide open** (`app.use(cors())`). Lock down origins before any real production hardening.
+- **CORS is env-driven** (`CORS_ORIGINS`). Unset → fail-open (any origin) with a boot warning — set in Render before wider release. Disallowed browser origins get no `Access-Control-Allow-Origin` header (not a 500). Requests without an `Origin` header always pass (health checks, curl).
+- **Logs:** no student messages or tokens logged by default. `AI_DEBUG_PROMPTS=true` logs full prompts (dev-only). `db.ts` logs Mongo host at boot to server logs only.
 - **`schema.md` is stale.** It predates several models/fields. The `.model.ts` files are authoritative.

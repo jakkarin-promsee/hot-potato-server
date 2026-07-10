@@ -15,9 +15,23 @@ const generateToken = (id: string) => {
 
 // POST /api/auth/register
 export const register = async (req: Request, res: Response): Promise<void> => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password } = req.body;
 
-  if (typeof password !== "string" || password.length < 8) {
+  if (
+    typeof name !== "string" ||
+    !name.trim() ||
+    typeof email !== "string" ||
+    !email.trim() ||
+    typeof password !== "string" ||
+    !password
+  ) {
+    res
+      .status(400)
+      .json({ message: "Name, email and password are required" });
+    return;
+  }
+
+  if (password.length < 8) {
     res.status(400).json({ message: "Password must be at least 8 characters" });
     return;
   }
@@ -28,7 +42,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const user = await User.create({ name, email, password, role });
+  const user = await User.create({ name, email, password });
   const token = generateToken(user._id.toString());
 
   res.status(201).json({

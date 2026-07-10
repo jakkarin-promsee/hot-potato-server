@@ -12,6 +12,7 @@ vi.mock("@google/genai", () => ({
   },
 }));
 
+import { getTutorModel } from "../../src/services/tutor/models";
 import app from "../../src/app";
 import {
   ChatSession,
@@ -395,11 +396,7 @@ describe("POST /api/chat/tutor", () => {
         mode: "free_chat",
         message: "สวัสดี",
       });
-    expect(capturedModel()).toBe(
-      (process.env.AI_TUTOR_MODEL ||
-        process.env.AI_HEAVY_MODEL ||
-        "gemini-2.5-flash").trim(),
-    );
+    expect(capturedModel()).toBe(getTutorModel());
   });
 
   it("20. question_feedback quick_check uses FAST_MODEL", async () => {
@@ -439,11 +436,7 @@ describe("POST /api/chat/tutor", () => {
           feedbackMode: "full_reflection",
         },
       });
-    expect(capturedModel()).toBe(
-      (process.env.AI_TUTOR_MODEL ||
-        process.env.AI_HEAVY_MODEL ||
-        "gemini-2.5-flash").trim(),
-    );
+    expect(capturedModel()).toBe(getTutorModel());
   });
 
   it("23. currentSection appended to final user turn (all modes), absent when omitted", async () => {
@@ -754,5 +747,54 @@ describe("POST /api/chat/tutor", () => {
       });
     const memory = await StudentMemory.findOne({ user_id: user._id });
     expect(memory?.tutor_personality).toBe("gentle");
+  });
+
+  it("27. AI_DEBUG_PROMPTS logs when enabled", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const prev = process.env.AI_DEBUG_PROMPTS;
+    process.env.AI_DEBUG_PROMPTS = "true";
+
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "hi",
+      });
+
+    const debugLines = logSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((line) => line.includes("[AI_DEBUG]"));
+    expect(debugLines.length).toBeGreaterThan(0);
+
+    logSpy.mockRestore();
+    if (prev === undefined) delete process.env.AI_DEBUG_PROMPTS;
+    else process.env.AI_DEBUG_PROMPTS = prev;
+  });
+
+  it("28. AI_DEBUG_PROMPTS does not log when unset", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const prev = process.env.AI_DEBUG_PROMPTS;
+    delete process.env.AI_DEBUG_PROMPTS;
+
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "hi",
+      });
+
+    const debugLines = logSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((line) => line.includes("[AI_DEBUG]"));
+    expect(debugLines.length).toBe(0);
+
+    logSpy.mockRestore();
+    if (prev !== undefined) process.env.AI_DEBUG_PROMPTS = prev;
   });
 });

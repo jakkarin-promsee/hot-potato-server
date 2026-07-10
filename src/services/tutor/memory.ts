@@ -8,13 +8,10 @@ import {
   StudentMemory,
 } from "../../models/student_memory.model";
 import { generateWithRetry } from "./retry";
+import { getFastModel } from "./models";
 
 const MEMORY_DIGEST_MAX = 600;
 const TOPIC_SUMMARY_MAX = 200;
-
-function getFastModel(): string {
-  return (process.env.AI_FAST_MODEL || "gemini-2.5-flash-lite").trim();
-}
 
 function clampStringList(items: unknown, cap: number): string[] {
   if (!Array.isArray(items)) return [];

@@ -32,16 +32,8 @@ function formatProfileResponse(user: {
 }
 
 export const getUsers = async (req: Request, res: Response): Promise<void> => {
-  const users = await User.find();
+  const users = await User.find().select("-password");
   res.json(users);
-};
-
-export const createUser = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  const user = await User.create(req.body);
-  res.status(201).json(user);
 };
 
 export const getMyProfile = async (

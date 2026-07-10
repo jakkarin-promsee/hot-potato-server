@@ -9,7 +9,9 @@
     "start": "node --use-system-ca dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ai": "node --use-system-ca ./node_modules/vitest/vitest.mjs run --config vitest.ai.config.ts"
+    "test:ai": "node --use-system-ca ./node_modules/vitest/vitest.mjs run --config vitest.ai.config.ts",
+    "promote": "ts-node scripts/promote-admin.ts",
+    "check-models": "node --use-system-ca ./node_modules/ts-node/dist/bin.js scripts/check-models.ts"
   },
   "repository": {
     "type": "git",

@@ -22,8 +22,24 @@ const app = express();
 // Render sits behind a proxy — trust the first hop so rate-limit keys use real client IPs.
 app.set("trust proxy", 1);
 
-// Middleware
-app.use(cors());
+function parseAllowedOrigins(): string[] {
+  return (process.env.CORS_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
+// Middleware — env-driven CORS allowlist; unconfigured → open (see index.ts boot warning)
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      const allowed = parseAllowedOrigins();
+      if (allowed.length === 0) return callback(null, true);
+      if (!origin) return callback(null, true);
+      callback(null, allowed.includes(origin.replace(/\/+$/, "")));
+    },
+  }),
+);
 app.use(express.json());
 
 // Status

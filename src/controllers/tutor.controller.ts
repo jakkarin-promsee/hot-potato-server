@@ -16,19 +16,10 @@ import {
   followupQuestionTag,
 } from "../services/tutor/persona";
 import { resolvePersonality } from "../services/tutor/personality";
+import { getFastModel, getTutorModel } from "../services/tutor/models";
 import { AuthRequest } from "../types";
 
-export function getFastModel(): string {
-  return (process.env.AI_FAST_MODEL || "gemini-2.5-flash-lite").trim();
-}
-
-export function getTutorModel(): string {
-  return (
-    process.env.AI_TUTOR_MODEL ||
-    process.env.AI_HEAVY_MODEL ||
-    "gemini-2.5-flash"
-  ).trim();
-}
+export { getFastModel, getTutorModel } from "../services/tutor/models";
 
 /** @deprecated Use getFastModel() / getTutorModel() — kept for imports that read defaults at load time. */
 export const FAST_MODEL = getFastModel();
@@ -433,6 +424,15 @@ export const tutorChat = async (
   }
 
   const model = resolveTutorModel(mode, qcResult.ctx.feedbackMode);
+
+  // Dev-only flag — logs student messages; never enable in production.
+  if (process.env.AI_DEBUG_PROMPTS === "true") {
+    console.log(
+      `[AI_DEBUG] model=${model} mode=${mode} historyTurns=${history.length}`,
+    );
+    console.log("[AI_DEBUG] systemInstruction:\n" + systemInstruction);
+    console.log("[AI_DEBUG] finalUserTurn:\n" + finalUserTurn);
+  }
 
   const persistOpts = {
     userId: userId!,

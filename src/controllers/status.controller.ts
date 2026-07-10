@@ -51,11 +51,6 @@ export const getDatabaseStatus = (_req: Request, res: Response): void => {
     database: "MongoDB",
     connection: label,
     ready_state: state,
-    ...(isConnected && {
-      host: mongoose.connection.host,
-      port: mongoose.connection.port,
-      db_name: mongoose.connection.name,
-    }),
   });
 };
 
@@ -107,10 +102,6 @@ export const getAllStatus = (_req: Request, res: Response): void => {
       database: {
         status: dbOk ? "ok" : "error",
         connection: mongoStateLabel(dbState),
-        ...(dbOk && {
-          host: mongoose.connection.host,
-          db_name: mongoose.connection.name,
-        }),
       },
       env: {
         status: envOk ? "ok" : "error",

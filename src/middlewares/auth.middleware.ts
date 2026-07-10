@@ -7,7 +7,8 @@ type TokenErrorCode =
   | "TOKEN_MISSING"
   | "TOKEN_EXPIRED"
   | "TOKEN_INVALID"
-  | "USER_NOT_FOUND";
+  | "USER_NOT_FOUND"
+  | "ACCOUNT_INACTIVE";
 
 function sendReloginResponse(
   res: Response,
@@ -56,6 +57,16 @@ export const protect = async (
       return;
     }
 
+    if (user.status !== "active") {
+      sendReloginResponse(
+        res,
+        401,
+        "Your account has been suspended or blocked",
+        "ACCOUNT_INACTIVE",
+      );
+      return;
+    }
+
     // 4. Attach user to request
     req.user = user;
     next();
@@ -95,7 +106,7 @@ export const optionalAuth = async (
       id: string;
     };
     const user = await User.findById(decoded.id).select("-password");
-    if (user) req.user = user;
+    if (user && user.status === "active") req.user = user;
   } catch {
     // Invalid/expired token — treat as anonymous for public endpoints
   }

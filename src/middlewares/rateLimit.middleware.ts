@@ -28,3 +28,18 @@ export function createChatRateLimiter() {
   });
   return [shortWindow, dayWindow];
 }
+
+// Bot guard for credential endpoints. Generous on purpose: a whole classroom
+// can share one school NAT IP, so the ceiling must comfortably exceed
+// "40 students all logging in during first period".
+export function createAuthRateLimiter() {
+  const perWindow = Number(process.env.AUTH_RATELIMIT_PER_10MIN) || 100;
+  return rateLimit({
+    windowMs: 10 * 60 * 1000,
+    limit: perWindow,
+    keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "Too many attempts, please try again later" },
+  });
+}
