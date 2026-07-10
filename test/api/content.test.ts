@@ -108,4 +108,64 @@ describe("PUT /api/content/:id", () => {
       .send({ title: "Hijack" });
     expect(res.status).toBe(403);
   });
+
+  it("11. agent_settings persisted and sanitized", async () => {
+    const { user, token } = await seedUser();
+    const lesson = await seedLesson(user._id);
+    const longNote = "ก".repeat(600);
+    const res = await request(app)
+      .put(`/api/content/${lesson._id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        agent_settings: {
+          persona_note: longNote,
+          allow_direct_answers: "yes",
+          scope: "invalid",
+          custom_guidelines: "  guide  ",
+        },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.agent_settings.persona_note).toHaveLength(500);
+    expect(res.body.agent_settings.allow_direct_answers).toBe(false);
+    expect(res.body.agent_settings.scope).toBe("lesson_plus_general");
+    expect(res.body.agent_settings.custom_guidelines).toBe("guide");
+  });
+
+  it("12. PUT without agent_settings leaves existing settings intact", async () => {
+    const { user, token } = await seedUser();
+    const lesson = await seedLesson(user._id, {
+      agent_settings: {
+        persona_note: "coach",
+        allow_direct_answers: false,
+        scope: "lesson_only",
+        custom_guidelines: "",
+      },
+    });
+    const res = await request(app)
+      .put(`/api/content/${lesson._id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Renamed" });
+    expect(res.status).toBe(200);
+    expect(res.body.agent_settings.persona_note).toBe("coach");
+    expect(res.body.agent_settings.scope).toBe("lesson_only");
+  });
+
+  it("13. GET load returns agent_settings", async () => {
+    const { user, token } = await seedUser();
+    const lesson = await seedLesson(user._id, {
+      access_type: "public",
+      agent_settings: {
+        persona_note: "friendly",
+        allow_direct_answers: true,
+        scope: "lesson_plus_general",
+        custom_guidelines: "be kind",
+      },
+    });
+    const res = await request(app)
+      .get(`/api/content/load?id=${lesson._id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.agent_settings.persona_note).toBe("friendly");
+    expect(res.body.agent_settings.allow_direct_answers).toBe(true);
+  });
 });

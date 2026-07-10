@@ -3,7 +3,7 @@ import { INTERNAL_TAG_PREFIXES } from "./persona";
 // Lenient on purpose: models occasionally emit "**[SUGGESTIONS]**",
 // "[SUGGESTIONS]:", or lowercase — an unmatched marker leaks the whole
 // suggestions block into the visible reply.
-const SUGGESTIONS_MARKER_REGEX = /^[\s*_]*\[suggestions\][\s*_:]*$/i;
+export const SUGGESTIONS_MARKER_REGEX = /^[\s*_]*\[suggestions\][\s*_:]*$/i;
 const MAX_SUGGESTIONS = 3;
 const MAX_SUGGESTION_LENGTH = 120;
 
@@ -105,4 +105,39 @@ export function parseTutorReply(raw: string): {
   }
 
   return { reply, suggestions };
+}
+
+/**
+ * Incremental filter for streamed tutor text. Feed raw model chunks; it
+ * returns the newly-safe-to-emit visible text. Everything from the
+ * [SUGGESTIONS] marker line onward is withheld. A trailing partial line is
+ * withheld only while it could still become a bracket-tag line (starts with
+ * optional whitespace, asterisk, or underscore, then "["), so normal prose streams unbuffered.
+ */
+export function createSuggestionsGate(): { push(chunk: string): string } {
+  let buffer = "";
+  let stopped = false;
+  const MAYBE_TAG = /^[\s*_]*\[/;
+  return {
+    push(chunk: string): string {
+      if (stopped) return "";
+      buffer += chunk;
+      let out = "";
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (SUGGESTIONS_MARKER_REGEX.test(line)) {
+          stopped = true;
+          return out;
+        }
+        out += line + "\n";
+      }
+      if (buffer && !MAYBE_TAG.test(buffer)) {
+        out += buffer;
+        buffer = "";
+      }
+      return out;
+    },
+  };
 }

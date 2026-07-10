@@ -1,5 +1,12 @@
 import { Schema, model, Document, Types } from "mongoose";
 
+export interface IAgentSettings {
+  persona_note: string;
+  allow_direct_answers: boolean;
+  scope: "lesson_only" | "lesson_plus_general";
+  custom_guidelines: string;
+}
+
 export interface IContent extends Document {
   owner_id: Types.ObjectId;
   collaborators: Types.ObjectId[];
@@ -13,9 +20,24 @@ export interface IContent extends Document {
   access_type: "public" | "link-only" | "private";
   topics: string[];
   description: string;
+  agent_settings: IAgentSettings;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const agentSettingsSchema = new Schema<IAgentSettings>(
+  {
+    persona_note: { type: String, default: "" },
+    allow_direct_answers: { type: Boolean, default: false },
+    scope: {
+      type: String,
+      enum: ["lesson_only", "lesson_plus_general"],
+      default: "lesson_plus_general",
+    },
+    custom_guidelines: { type: String, default: "" },
+  },
+  { _id: false },
+);
 
 const contentSchema = new Schema<IContent>(
   {
@@ -41,6 +63,10 @@ const contentSchema = new Schema<IContent>(
     description: {
       type: String,
       default: "",
+    },
+    agent_settings: {
+      type: agentSettingsSchema,
+      default: () => ({}),
     },
   },
   { timestamps: true },

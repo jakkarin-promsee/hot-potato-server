@@ -4,6 +4,7 @@ import {
   REPORT_LABELS,
   stripInternalTags,
   stripReportLabels,
+  createSuggestionsGate,
 } from "../../src/services/tutor/parse";
 
 describe("parseTutorReply", () => {
@@ -232,5 +233,47 @@ describe("lenient [SUGGESTIONS] marker", () => {
   it("4. marker embedded in prose is still treated as literal text", () => {
     const raw = "คำว่า [SUGGESTIONS] โผล่ในบทเรียนได้นะ";
     expect(parseTutorReply(raw)).toEqual({ reply: raw, suggestions: [] });
+  });
+});
+
+describe("createSuggestionsGate", () => {
+  it("1. plain multi-line text passes through unchanged", () => {
+    const gate = createSuggestionsGate();
+    const input = "line one\nline two\nline three";
+    expect(gate.push(input)).toBe(input);
+  });
+
+  it("2. marker on its own line stops emission", () => {
+    const gate = createSuggestionsGate();
+    expect(gate.push("visible\n[SUGGESTIONS]\n- hidden")).toBe("visible\n");
+    expect(gate.push("- more hidden")).toBe("");
+  });
+
+  it("3. marker split across chunks leaks nothing", () => {
+    const gate = createSuggestionsGate();
+    expect(gate.push("ดี\n[SUGG")).toBe("ดี\n");
+    expect(gate.push("ESTIONS]\n- x")).toBe("");
+  });
+
+  it("4. bolded marker variant is caught", () => {
+    const gate = createSuggestionsGate();
+    expect(gate.push("ok\n**[SUGGESTIONS]**\n- x")).toBe("ok\n");
+    expect(gate.push("- y")).toBe("");
+  });
+
+  it("5. single-line reply with no newline streams immediately", () => {
+    const gate = createSuggestionsGate();
+    expect(gate.push("hello")).toBe("hello");
+  });
+
+  it("6. partial line starting with [ is withheld until resolved", () => {
+    const gate = createSuggestionsGate();
+    expect(gate.push("[maybe")).toBe("");
+    expect(gate.push(" tag]\nreal line\n")).toBe("[maybe tag]\nreal line\n");
+  });
+
+  it("7. false alarm bracket line is emitted intact", () => {
+    const gate = createSuggestionsGate();
+    expect(gate.push("[Formula] E=mc²\nnext")).toBe("[Formula] E=mc²\nnext");
   });
 });

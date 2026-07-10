@@ -17,6 +17,8 @@ export interface IStudentMemory extends Document {
   growth_areas: string[];
   preferences: string[];
   recent_topics: IRecentTopic[];
+  /** Student-selected tutor personality id (synced from client). */
+  tutor_personality: string;
   updatedAt: Date;
   createdAt: Date;
 }
@@ -40,6 +42,7 @@ const studentMemorySchema = new Schema<IStudentMemory>(
         updatedAt: { type: Date, default: Date.now },
       },
     ],
+    tutor_personality: { type: String, default: "" },
   },
   { timestamps: true },
 );

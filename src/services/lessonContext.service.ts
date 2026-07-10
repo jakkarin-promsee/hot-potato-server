@@ -1,4 +1,5 @@
 import { Content } from "../models/content.model";
+import type { IAgentSettings } from "../models/content.model";
 
 export interface LessonQuestion {
   blockId: string;
@@ -18,6 +19,28 @@ export interface LessonContext {
   collaboratorIds: string[];
   text: string;
   questions: LessonQuestion[];
+  agentSettings: IAgentSettings;
+}
+
+const DEFAULT_AGENT_SETTINGS: IAgentSettings = {
+  persona_note: "",
+  allow_direct_answers: false,
+  scope: "lesson_plus_general",
+  custom_guidelines: "",
+};
+
+function normalizeAgentSettings(raw: unknown): IAgentSettings {
+  if (typeof raw !== "object" || raw === null) return { ...DEFAULT_AGENT_SETTINGS };
+  const r = raw as Record<string, unknown>;
+  return {
+    persona_note:
+      typeof r.persona_note === "string" ? r.persona_note : "",
+    allow_direct_answers: r.allow_direct_answers === true,
+    scope:
+      r.scope === "lesson_only" ? "lesson_only" : "lesson_plus_general",
+    custom_guidelines:
+      typeof r.custom_guidelines === "string" ? r.custom_guidelines : "",
+  };
 }
 
 interface TipTapNode {
@@ -320,6 +343,7 @@ function buildLessonContext(
     owner_id: { toString(): string };
     collaborators: { toString(): string }[];
     tiptap_json: string;
+    agent_settings?: unknown;
   },
 ): LessonContext {
   const { text, questions } = parseTiptapDoc(content.tiptap_json);
@@ -332,6 +356,7 @@ function buildLessonContext(
     collaboratorIds: content.collaborators.map((c) => c.toString()),
     text,
     questions,
+    agentSettings: normalizeAgentSettings(content.agent_settings),
   };
 }
 

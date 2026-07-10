@@ -65,9 +65,10 @@ server/src/
 │   ├── learningHistory.service.ts         # touchLearningHistory(user, content)
 │   ├── lessonContext.service.ts           # load + serialize lesson from tiptap_json (cached)
 │   └── tutor/                             # unified tutor agent (Phase 1+)
-│       ├── genaiClient.ts                 # callTutorModel — multi-turn Gemini wrapper
-│       ├── parse.ts                       # parseTutorReply — [SUGGESTIONS] block parser (Phase 2)
-│       ├── persona.ts                     # buildSystemInstruction + TUTOR_NAME (Phase 2 persona)
+│       ├── genaiClient.ts                 # callTutorModel + callTutorModelStream
+│       ├── parse.ts                       # parseTutorReply + createSuggestionsGate
+│       ├── persona.ts                     # buildSystemInstruction + teacher/personality injection
+│       ├── personality.ts                 # student preset catalog + resolvePersonality
 │       └── retry.ts                       # isTransientAIError + generateWithRetry
 ├── types/index.ts          # AuthRequest (Express Request + .user)
 └── models/schema.md        # OLDER hand sketch of the model — trust the .model.ts files
@@ -120,7 +121,7 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 ### `/api/chat` — `tutor.controller.ts` + `memory.controller.ts`
 | Method | Path | Guard | Purpose |
 | --- | --- | --- | --- |
-| POST | `/tutor` | 🔓 optionalAuth + rate limit | **Unified tutor agent** — the only AI endpoint. Server-side lesson context + multi-turn history, 4 modes. |
+| POST | `/tutor` | 🔓 optionalAuth + rate limit | **Unified tutor agent** — 4 modes. Optional `stream: true` → SSE (`token`, `suggestions`, `done`, `error` events); JSON mode unchanged as fallback. Optional `personality` string (student preset id). |
 | GET | `/memory` | 🔒 protect | Read the logged-in user's `StudentMemory` doc (or `{}`) |
 | DELETE | `/memory` | 🔒 protect | Wipe the logged-in user's memory sketch |
 
@@ -140,11 +141,11 @@ Defined in `models/*.model.ts`. Mongoose `timestamps` add `createdAt`/`updatedAt
 | --- | --- | --- |
 | **User** | `name`, `email` (unique, lowercased), `password`, `role`, `status` | `role`: `admin \| creator \| learner` (default `learner`). `status`: `active \| blocked \| suspended`. Password auto-hashed (bcrypt, cost 12) in a `pre("save")` hook; `comparePassword()` method. |
 | **UserData** | `user_id` (unique), `avatar?`, `bio?`, `metadata` (Mixed) | Optional profile extension. Flexible `metadata` for future use. |
-| **Content** | `owner_id`, `collaborators[]`, `title`, `title_image`, `tiptap_json`, `access_type`, `topics[]`, `description` | The lesson. `tiptap_json` is the **stringified TipTap document** (default `"{}"`). `access_type`: `public \| link-only \| private` (default `private`). `author_name` + `collaborator_names[]` are **denormalized** copies kept in sync by `contentAuthorSnapshot.service.ts`. |
+| **Content** | `owner_id`, `collaborators[]`, `title`, `title_image`, `tiptap_json`, `access_type`, `topics[]`, `description`, `agent_settings` | The lesson. `agent_settings`: `{ persona_note, allow_direct_answers, scope, custom_guidelines }` — teacher AI tutor controls (Tier 1.B). `tiptap_json` is the **stringified TipTap document** (default `"{}"`). `access_type`: `public \| link-only \| private` (default `private`). `author_name` + `collaborator_names[]` are **denormalized** copies kept in sync by `contentAuthorSnapshot.service.ts`. |
 | **UserContent** | `user_id`, `content_id`, `answers: Map<blockId, any>`, `last_visited` | One row per (user, content). The **student progress / answers** tracker. Unique compound index. |
 | **LearningHistory** | `user_id`, `content_id`, `last_accessed` | One row per (user, content) for "recently opened". Unique + `(user_id, last_accessed desc)` index. Updated via `touchLearningHistory()`. |
 | **ChatSession** | `user_id`, `content_id`, `block_id`, `messages[]` | Per (user, content, block) tutor conversation. Unique compound index; pre-save hook caps at 50 messages. Logged-in only — anonymous clients pass `clientThread` per request. |
-| **StudentMemory** | `user_id` (unique), `interests[]`, `strengths[]`, `growth_areas[]`, `preferences[]`, `recent_topics[]` | One warm sketch per logged-in student (≤10 items per list, ≤120 chars each). Updated async every N student turns via `AI_FAST_MODEL` (`services/tutor/memory.ts`); injected into tutor `systemInstruction` as a digest. Anonymous users have no row. |
+| **StudentMemory** | `user_id` (unique), `interests[]`, `strengths[]`, `growth_areas[]`, `preferences[]`, `recent_topics[]`, `tutor_personality` | One warm sketch per logged-in student (≤10 items per list, ≤120 chars each). `tutor_personality` stores the student's selected preset id (Tier 1.C). Updated async every N student turns via `AI_FAST_MODEL` (`services/tutor/memory.ts`); injected into tutor `systemInstruction` as a digest. Anonymous users have no row. |
 | **Category** | `user_id`, `name`, `description` | Image-library folder. Unique per `(user_id, name)`. Uses `created_at` (no `updatedAt`). |
 | **Image** | `user_id`, `category_id?`, `public_id` (unique), `secure_url`, `original_filename`, `format`, `bytes`, `width`, `height` | Cloudinary image metadata. Uses `created_at` only. |
 
@@ -177,6 +178,8 @@ Entry point: `controllers/tutor.controller.ts` (`tutorChat`), logic in `services
 | `clientThread` | Anonymous users' history (last 30 kept); ignored when logged in. |
 | `questionContext` | Required for feedback modes: `{ question, guideAnswer, evaluation: { level (correct\|almost\|incorrect\|ai_judge), accuracyPercent, diagnostics? ≤500 }, feedbackMode }`. `diagnostics` carries deterministic per-choice/per-blank check results. |
 | `currentSection` | Optional ≤500-char reading-position hint; appended to the final user turn (all modes). |
+| `stream` | Optional `true` → `text/event-stream` with `token` / `suggestions` / `done` / `error` events. Absent/false → JSON `{ reply, suggestions, sessionId }`. |
+| `personality` | Optional preset id string (≤40 chars); invalid ids silently default. Layered under teacher `agent_settings`. |
 
 **Response:** `{ reply, suggestions[], sessionId }` — `parseTutorReply` (`services/tutor/parse.ts`) splits the `[SUGGESTIONS]` block into up to 3 chips.
 

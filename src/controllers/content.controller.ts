@@ -1,8 +1,25 @@
 import { Response } from "express";
 import { Types } from "mongoose";
-import { Content } from "../models/content.model";
+import { Content, IAgentSettings } from "../models/content.model";
 import { buildAuthorSnapshot } from "../services/contentAuthorSnapshot.service";
 import { AuthRequest } from "../types";
+
+function sanitizeAgentSettings(raw: unknown): IAgentSettings | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  return {
+    persona_note:
+      typeof r.persona_note === "string"
+        ? r.persona_note.trim().slice(0, 500)
+        : "",
+    allow_direct_answers: r.allow_direct_answers === true,
+    scope: r.scope === "lesson_only" ? "lesson_only" : "lesson_plus_general",
+    custom_guidelines:
+      typeof r.custom_guidelines === "string"
+        ? r.custom_guidelines.trim().slice(0, 1000)
+        : "",
+  };
+}
 
 // GET /api/content/load?id=xx (optional auth: anonymous may load public / link-only)
 export const loadContent = async (
@@ -68,9 +85,17 @@ export const updateContent = async (
     clientUpdatedAt,
     author_name: _dropAuthor,
     collaborator_names: _dropCollabNames,
+    agent_settings,
     ...rest
   } = req.body;
   const updateData: Record<string, unknown> = { ...rest };
+
+  if (Object.prototype.hasOwnProperty.call(req.body, "agent_settings")) {
+    const sanitized = sanitizeAgentSettings(agent_settings);
+    if (sanitized) {
+      updateData["agent_settings"] = sanitized;
+    }
+  }
 
   const content = await Content.findById(req.params.id);
 

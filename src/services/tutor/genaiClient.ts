@@ -28,3 +28,29 @@ export async function callTutorModel(opts: {
   );
   return (result.text ?? "").trim();
 }
+
+export async function* callTutorModelStream(opts: {
+  model: string;
+  systemInstruction: string;
+  history: TutorTurn[];
+  message: string;
+}): AsyncGenerator<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("MISSING_GEMINI_API_KEY");
+  const ai = new GoogleGenAI({ apiKey });
+  const contents = [
+    ...opts.history.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
+    { role: "user" as const, parts: [{ text: opts.message }] },
+  ];
+  const stream = await generateWithRetry(() =>
+    ai.models.generateContentStream({
+      model: opts.model,
+      contents,
+      config: { systemInstruction: opts.systemInstruction },
+    }),
+  );
+  for await (const chunk of stream) {
+    const text = chunk.text ?? "";
+    if (text) yield text;
+  }
+}

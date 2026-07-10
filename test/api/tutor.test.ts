@@ -17,6 +17,7 @@ import {
   ChatSession,
   MAX_SESSION_MESSAGES,
 } from "../../src/models/chat_session.model";
+import { StudentMemory } from "../../src/models/student_memory.model";
 import { clearLessonContextCache } from "../../src/services/lessonContext.service";
 import { seedLesson, seedUser } from "../helpers/seed";
 
@@ -682,5 +683,76 @@ describe("POST /api/chat/tutor", () => {
       "ทำไมต้องมีคลอโรฟิลล์?",
       "ถ้าไม่มีแสงจะเกิดอะไรขึ้น?",
     ]);
+  });
+
+  it("23. lesson agent_settings persona_note appears in system instruction", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, {
+      access_type: "public",
+      agent_settings: {
+        persona_note: "พูดเหมือนโค้ชกีฬา",
+        allow_direct_answers: false,
+        scope: "lesson_plus_general",
+        custom_guidelines: "",
+      },
+    });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "สวัสดี",
+      });
+    expect(capturedSystemInstruction()).toContain(
+      "== การตั้งค่าจากคุณครูของบทเรียนนี้ ==",
+    );
+    expect(capturedSystemInstruction()).toContain("พูดเหมือนโค้ชกีฬา");
+  });
+
+  it("24. personality sassy in request → system instruction contains sassy block", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "hi",
+        personality: "sassy",
+      });
+    expect(capturedSystemInstruction()).toContain("แซวเพื่อนได้แบบน่ารักๆ");
+  });
+
+  it("25. invalid personality → 200 with default instruction", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    const res = await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "hi",
+        personality: "not-a-real-id",
+      });
+    expect(res.status).toBe(200);
+    expect(capturedSystemInstruction()).not.toContain(
+      "== สไตล์การคุยที่เพื่อนเลือก ==",
+    );
+  });
+
+  it("26. logged-in personality syncs to StudentMemory", async () => {
+    const { user, token } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "hi",
+        personality: "gentle",
+      });
+    const memory = await StudentMemory.findOne({ user_id: user._id });
+    expect(memory?.tutor_personality).toBe("gentle");
   });
 });

@@ -348,4 +348,16 @@ describe("getLessonContext integration", () => {
     const ctx = await getLessonContext(new Types.ObjectId().toString());
     expect(ctx).toBeNull();
   });
+
+  it("agentSettings populated with defaults for docs without the field", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id);
+    const ctx = await getLessonContext(lesson._id.toString());
+    expect(ctx?.agentSettings).toEqual({
+      persona_note: "",
+      allow_direct_answers: false,
+      scope: "lesson_plus_general",
+      custom_guidelines: "",
+    });
+  });
 });

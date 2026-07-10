@@ -3,18 +3,19 @@ import mongoose, { Types } from "mongoose";
 import { ChatSession } from "../models/chat_session.model";
 import { StudentMemory } from "../models/student_memory.model";
 import { getLessonContext } from "../services/lessonContext.service";
-import { callTutorModel } from "../services/tutor/genaiClient";
+import { callTutorModel, callTutorModelStream } from "../services/tutor/genaiClient";
 import {
   buildMemoryDigest,
   runMemoryUpdate,
 } from "../services/tutor/memory";
-import { parseTutorReply } from "../services/tutor/parse";
+import { createSuggestionsGate, parseTutorReply } from "../services/tutor/parse";
 import {
   buildFeedbackUserTurn,
   buildSystemInstruction,
   currentSectionTag,
   followupQuestionTag,
 } from "../services/tutor/persona";
+import { resolvePersonality } from "../services/tutor/personality";
 import { AuthRequest } from "../types";
 
 export function getFastModel(): string {
@@ -71,6 +72,8 @@ interface TutorChatBody {
   clientThread?: unknown;
   questionContext?: unknown;
   currentSection?: unknown;
+  stream?: unknown;
+  personality?: unknown;
 }
 
 function isValidObjectId(id: string): boolean {
@@ -234,6 +237,68 @@ function checkContentAccess(
   return { ok: true };
 }
 
+function coercePersonality(raw: unknown): string {
+  if (typeof raw !== "string") return "default";
+  return raw.trim().slice(0, 40) || "default";
+}
+
+async function persistTurn(opts: {
+  userId: string;
+  contentId: string;
+  blockId: string;
+  message: string;
+  mode: TutorMode;
+  reply: string;
+  lessonTitle: string;
+  session: InstanceType<typeof ChatSession> | null;
+  resolvedPersonalityId?: string;
+  requestPersonality?: string;
+  storedTutorPersonality?: string;
+}): Promise<InstanceType<typeof ChatSession> | null> {
+  let { session } = opts;
+  if (!session) {
+    session = new ChatSession({
+      user_id: new Types.ObjectId(opts.userId),
+      content_id: new Types.ObjectId(opts.contentId),
+      block_id: opts.blockId,
+      messages: [],
+    });
+  }
+  session.messages.push(
+    { role: "student", text: opts.message, mode: opts.mode, createdAt: new Date() },
+    { role: "tutor", text: opts.reply, mode: opts.mode, createdAt: new Date() },
+  );
+  await session.save();
+
+  const everyN = Number(process.env.AI_MEMORY_EVERY_N_TURNS) || 3;
+  const studentTurns = session.messages.filter((m) => m.role === "student").length;
+  if (opts.mode === "write_evaluation" || studentTurns % everyN === 0) {
+    void runMemoryUpdate({
+      userId: new Types.ObjectId(opts.userId),
+      contentId: new Types.ObjectId(opts.contentId),
+      lessonTitle: opts.lessonTitle,
+      recentTurns: session.messages.slice(-6).map((m) => ({
+        role: m.role,
+        text: m.text,
+      })),
+    }).catch((e) => console.warn("memory update failed:", e));
+  }
+
+  if (
+    opts.requestPersonality !== undefined &&
+    opts.resolvedPersonalityId !== undefined &&
+    opts.resolvedPersonalityId !== (opts.storedTutorPersonality ?? "")
+  ) {
+    void StudentMemory.findOneAndUpdate(
+      { user_id: new Types.ObjectId(opts.userId) },
+      { $set: { tutor_personality: opts.resolvedPersonalityId } },
+      { upsert: true },
+    ).catch((e) => console.warn("personality sync failed:", e));
+  }
+
+  return session;
+}
+
 export const tutorChat = async (
   req: AuthRequest,
   res: Response,
@@ -276,6 +341,10 @@ export const tutorChat = async (
   const blockId = coerceBlockId(body.blockId);
   const clientThread = sanitizeClientThread(body.clientThread);
   const currentSection = coerceOptionalText(body.currentSection, 500);
+  const wantStream = body.stream === true;
+  const personalityRaw =
+    body.personality !== undefined ? coercePersonality(body.personality) : undefined;
+  const resolvedPersonality = resolvePersonality(personalityRaw);
 
   const lesson = await getLessonContext(contentId);
   if (!lesson) {
@@ -319,15 +388,22 @@ export const tutorChat = async (
   }));
 
   let memoryDigest: string | undefined;
+  let storedTutorPersonality = "";
   if (userId) {
     const memory = await StudentMemory.findOne({
       user_id: new Types.ObjectId(userId),
     });
     const digest = buildMemoryDigest(memory);
     if (digest) memoryDigest = digest;
+    storedTutorPersonality = memory?.tutor_personality ?? "";
   }
 
-  const systemInstruction = buildSystemInstruction({ lesson, memoryDigest });
+  const systemInstruction = buildSystemInstruction({
+    lesson,
+    memoryDigest,
+    agentSettings: lesson.agentSettings,
+    personality: resolvedPersonality,
+  });
 
   let finalUserTurn = message;
   if (mode === "question_feedback" || mode === "write_evaluation") {
@@ -358,6 +434,79 @@ export const tutorChat = async (
 
   const model = resolveTutorModel(mode, qcResult.ctx.feedbackMode);
 
+  const persistOpts = {
+    userId: userId!,
+    contentId,
+    blockId,
+    message,
+    mode,
+    lessonTitle: lesson.title,
+    session,
+    resolvedPersonalityId: resolvedPersonality.id,
+    requestPersonality: personalityRaw,
+    storedTutorPersonality,
+  };
+
+  if (wantStream) {
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const send = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    let clientGone = false;
+    req.on("close", () => {
+      clientGone = true;
+    });
+
+    let raw = "";
+    const gate = createSuggestionsGate();
+    try {
+      for await (const chunk of callTutorModelStream({
+        model,
+        systemInstruction,
+        history: geminiHistory,
+        message: finalUserTurn,
+      })) {
+        raw += chunk;
+        if (clientGone) continue;
+        const visible = gate.push(chunk);
+        if (visible) send("token", { text: visible });
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg === "MISSING_GEMINI_API_KEY") {
+        if (!clientGone) {
+          send("error", { message: "Missing GEMINI_API_KEY in server env" });
+        }
+        res.end();
+        return;
+      }
+      console.error("Tutor stream failed:", error);
+      if (!clientGone) send("error", { message: "AI request failed" });
+      res.end();
+      return;
+    }
+
+    const { reply, suggestions } = parseTutorReply(raw);
+
+    if (userId) {
+      session = await persistTurn({ ...persistOpts, reply, session });
+    }
+
+    if (!clientGone) {
+      send("suggestions", { suggestions });
+      send("done", { reply, sessionId: session?._id ?? null });
+    }
+    res.end();
+    return;
+  }
+
   try {
     const raw = await callTutorModel({
       model,
@@ -368,35 +517,7 @@ export const tutorChat = async (
     const { reply, suggestions } = parseTutorReply(raw);
 
     if (userId) {
-      if (!session) {
-        session = new ChatSession({
-          user_id: new Types.ObjectId(userId),
-          content_id: new Types.ObjectId(contentId),
-          block_id: blockId,
-          messages: [],
-        });
-      }
-      session.messages.push(
-        { role: "student", text: message, mode, createdAt: new Date() },
-        { role: "tutor", text: reply, mode, createdAt: new Date() },
-      );
-      await session.save();
-
-      const everyN = Number(process.env.AI_MEMORY_EVERY_N_TURNS) || 3;
-      const studentTurns = session.messages.filter(
-        (m) => m.role === "student",
-      ).length;
-      if (mode === "write_evaluation" || studentTurns % everyN === 0) {
-        void runMemoryUpdate({
-          userId: new Types.ObjectId(userId),
-          contentId: new Types.ObjectId(contentId),
-          lessonTitle: lesson.title,
-          recentTurns: session.messages.slice(-6).map((m) => ({
-            role: m.role,
-            text: m.text,
-          })),
-        }).catch((e) => console.warn("memory update failed:", e));
-      }
+      session = await persistTurn({ ...persistOpts, reply, session });
     }
 
     res.status(200).json({
