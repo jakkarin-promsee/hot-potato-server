@@ -445,6 +445,131 @@ describe("POST /api/chat/tutor", () => {
     );
   });
 
+  it("23. currentSection appended to final user turn (all modes), absent when omitted", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "อันนี้คืออะไร",
+        currentSection: "หัวข้อ: การหายใจระดับเซลล์",
+      });
+    let finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).toContain(
+      "[ตอนนี้เพื่อนกำลังอ่าน/อยู่แถวส่วนนี้ของบทเรียน: หัวข้อ: การหายใจระดับเซลล์]",
+    );
+
+    mockGenerateContent.mockClear();
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "question_feedback",
+        message: "น้ำ",
+        currentSection: "หัวข้อ: วัตถุดิบ",
+        questionContext: {
+          question: "วัตถุดิบคืออะไร",
+          evaluation: { level: "almost", accuracyPercent: 50 },
+        },
+      });
+    finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).toContain("[งานของเธอตอนนี้");
+    expect(finalTurn).toContain(
+      "[ตอนนี้เพื่อนกำลังอ่าน/อยู่แถวส่วนนี้ของบทเรียน: หัวข้อ: วัตถุดิบ]",
+    );
+
+    mockGenerateContent.mockClear();
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "free_chat",
+        message: "ไม่มี section",
+      });
+    finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).toBe("ไม่มี section");
+  });
+
+  it("24. diagnostics included in feedback turn, capped at 500 chars, absent when omitted", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "question_feedback",
+        message: "น้ำ",
+        questionContext: {
+          question: "วัตถุดิบคืออะไร",
+          evaluation: {
+            level: "almost",
+            accuracyPercent: 50,
+            diagnostics: "missedCorrect=CO2; wrongSelected=(none)",
+          },
+        },
+      });
+    let finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).toContain(
+      "รายละเอียดการตรวจ (ระบบตรวจให้แล้ว): missedCorrect=CO2; wrongSelected=(none)",
+    );
+
+    mockGenerateContent.mockClear();
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "question_feedback",
+        message: "น้ำ",
+        questionContext: {
+          question: "วัตถุดิบคืออะไร",
+          evaluation: { level: "almost", accuracyPercent: 50 },
+        },
+      });
+    finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).not.toContain("รายละเอียดการตรวจ");
+
+    mockGenerateContent.mockClear();
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "question_feedback",
+        message: "น้ำ",
+        questionContext: {
+          question: "วัตถุดิบคืออะไร",
+          evaluation: {
+            level: "almost",
+            accuracyPercent: 50,
+            diagnostics: "x".repeat(600),
+          },
+        },
+      });
+    finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).toContain("x".repeat(500));
+    expect(finalTurn).not.toContain("x".repeat(501));
+  });
+
+  it("25. diagnostics ignored outside feedback modes", async () => {
+    const { user } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await request(app)
+      .post("/api/chat/tutor")
+      .send({
+        contentId: lesson._id.toString(),
+        mode: "followup",
+        message: "ขอ hint หน่อย",
+        questionContext: {
+          question: "วัตถุดิบคืออะไร",
+          evaluation: { level: "almost", diagnostics: "should-not-appear" },
+        },
+      });
+    const finalTurn = capturedContents()!.at(-1)!.parts[0].text;
+    expect(finalTurn).toBe("ขอ hint หน่อย");
+    expect(finalTurn).not.toContain("should-not-appear");
+  });
+
   it("22. parses [SUGGESTIONS] block from AI reply", async () => {
     mockGenerateContent.mockResolvedValueOnce({
       text: [

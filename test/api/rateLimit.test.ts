@@ -18,7 +18,7 @@ describe("chat rate limiting", () => {
     app.set("trust proxy", 1);
     app.use(express.json());
     const handler = vi.fn((_req, res) => res.status(200).json({ answer: "ok" }));
-    app.post("/api/chat/ask", optionalAuth, ...createChatRateLimiter(), handler);
+    app.post("/api/chat/tutor", optionalAuth, ...createChatRateLimiter(), handler);
   });
 
   it("returns 429 after the 10-min limit and keeps serving other IPs/users", async () => {
@@ -26,21 +26,21 @@ describe("chat rate limiting", () => {
 
     for (let i = 0; i < 3; i++) {
       const res = await request(app)
-        .post("/api/chat/ask")
+        .post("/api/chat/tutor")
         .set("X-Forwarded-For", anonIp)
         .send({ prompt: `hi-${i}` });
       expect(res.status).toBe(200);
     }
 
     const blocked = await request(app)
-      .post("/api/chat/ask")
+      .post("/api/chat/tutor")
       .set("X-Forwarded-For", anonIp)
       .send({ prompt: "one-too-many" });
     expect(blocked.status).toBe(429);
     expect(blocked.body).toEqual({ message: "Too many requests" });
 
     const authed = await request(app)
-      .post("/api/chat/ask")
+      .post("/api/chat/tutor")
       .set("X-Forwarded-For", anonIp)
       .set("Authorization", `Bearer ${token}`)
       .send({ prompt: "logged-in ok" });

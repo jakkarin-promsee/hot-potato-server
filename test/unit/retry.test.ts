@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   isTransientAIError,
   generateWithRetry,
-} from "../../src/controllers/chat.controller";
+} from "../../src/services/tutor/retry";
 
 describe("isTransientAIError", () => {
   it("1. classifies known transient failures as retryable", () => {

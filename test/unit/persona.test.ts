@@ -67,4 +67,21 @@ describe("buildSystemInstruction", () => {
     expect(sys).toContain("== โน้ตจากคุณครู ==");
     expect(sys).toContain("พูดเหมือนโค้ชกีฬา");
   });
+
+  it("7. gates evaluation behind the feedback tag (intent rule)", () => {
+    const sys = buildSystemInstruction({ lesson: sampleLesson });
+    expect(sys).toContain("== เมื่อไหร่ประเมิน เมื่อไหร่คุยเฉยๆ (สำคัญมาก) ==");
+    // Evaluation only when the exact feedback tag opens the message
+    expect(sys).toContain(
+      'ONLY when the latest message starts with the tag "[งานของเธอตอนนี้: ให้ฟีดแบ็กคำตอบของเพื่อน]"',
+    );
+    // Chit-chat / greetings must never be graded
+    expect(sys).toContain("NEVER treat it as an answer");
+    expect(sys).toContain("NEVER give an evaluation");
+  });
+
+  it("8. follow-up re-attempts are coached, not formally judged", () => {
+    const sys = buildSystemInstruction({ lesson: sampleLesson });
+    expect(sys).toContain("do not produce a formal verdict");
+  });
 });

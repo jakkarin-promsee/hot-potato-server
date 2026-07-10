@@ -27,7 +27,7 @@ npm run test:watch
 npm run test:ai  # live Gemini smoke; reads GEMINI_API_KEY from .env (vitest.ai.config sets RUN_AI_TESTS)
 ```
 
-**Tests:** Vitest + supertest + `mongodb-memory-server` in `test/`. `npm test` runs fully **offline** (93 tests; no network, no real DB, no API key). `npm run test:ai` costs real tokens — run at phase boundaries only; loads `.env` in `test/setup.ts`.
+**Tests:** Vitest + supertest + `mongodb-memory-server` in `test/`. `npm test` runs fully **offline** (no network, no real DB, no API key). `npm run test:ai` costs real tokens — run at phase boundaries only; loads `.env` in `test/setup.ts`. The live smoke (`test/ai/live.ai.test.ts`) exercises all four `/chat/tutor` modes.
 
 **Layout:**
 
@@ -37,7 +37,7 @@ server/test/
 ├── fixtures/lesson.json  # committed lesson fixture (re-export from real DB via scripts/export-fixture.ts)
 ├── helpers/seed.ts
 ├── unit/                 # prompt builders, retry logic, lessonContext serializer
-├── api/                  # auth, content, answers, chat, tutor (supertest)
+├── api/                  # auth, content, answers, tutor, memory, rateLimit (supertest)
 └── ai/                   # live Gemini smoke (*.ai.test.ts, excluded from npm test)
 ```
 
@@ -117,17 +117,14 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 ### `/api/images` — `image.controller.ts` (all 🔒)
 `GET /` · `POST /` (save metadata) · `POST /url` (save from URL) · `DELETE /:public_id` · `DELETE /` (clear all) · `PATCH /:public_id/category` — the user's Cloudinary image library.
 
-### `/api/chat` — `chat.controller.ts` + `tutor.controller.ts` + `memory.controller.ts`
+### `/api/chat` — `tutor.controller.ts` + `memory.controller.ts`
 | Method | Path | Guard | Purpose |
 | --- | --- | --- | --- |
-| POST | `/ask` | 🔓 optionalAuth + rate limit | Grounded learning Q&A (legacy — client still uses until Phase 5) |
-| POST | `/feedback` | 🔓 | Feedback on a structured answer (legacy) |
-| POST | `/write-evaluate` | 🔓 | Deep evaluation of open-ended answer (legacy) |
-| POST | `/tutor` | 🔓 | **Unified tutor agent** — server-side lesson context + multi-turn history |
+| POST | `/tutor` | 🔓 optionalAuth + rate limit | **Unified tutor agent** — the only AI endpoint. Server-side lesson context + multi-turn history, 4 modes. |
 | GET | `/memory` | 🔒 protect | Read the logged-in user's `StudentMemory` doc (or `{}`) |
 | DELETE | `/memory` | 🔒 protect | Wipe the logged-in user's memory sketch |
 
-**Note:** `/memory` is the only protected chat route — AI usage itself stays open (`optionalAuth` on `/tutor` and legacy endpoints).
+**Note:** `/memory` is the only protected chat route — AI usage itself stays open (`optionalAuth` on `/tutor`). The legacy `/ask`, `/feedback`, `/write-evaluate` endpoints and `chat.controller.ts` were **deleted in Tier 0 Phase 0.A** (2026-07-10); every client flow now calls `/tutor`.
 
 ### `/api/users` — `user.controller.ts`
 `GET /` 🔒 (list) · `POST /` 🌐 (create). `restrictTo(...roles)` exists for role-gating but is lightly used.
@@ -165,17 +162,25 @@ Login/register return `{ user, token }`; the token is a JWT signed with `JWT_SEC
 
 ## AI integration (Gemini)
 
-> **🔥 Active rework (Phase 4 next).** Phase 1–3 shipped: `POST /api/chat/tutor` with server-side lesson context, `ChatSession` persistence, Phase 2 persona + `[SUGGESTIONS]`, and Phase 3 `StudentMemory` (async update + digest injection + `GET`/`DELETE /memory`). Legacy `/ask`, `/feedback`, `/write-evaluate` remain until Phase 5 client rewire. Read [`../ROADMAP.md`](../ROADMAP.md) + [`../ROADMAP-detailed.md`](../ROADMAP-detailed.md) before touching AI code. Golden Rules: (1) never ration tokens; (2) anonymous full AI access (`optionalAuth` only on AI routes).
+> **🔥 Tier 0 in progress.** Phase 0.A (2026-07-10) deleted the legacy endpoints + `chat.controller.ts`; **`POST /api/chat/tutor` is now the only AI endpoint** and every client flow uses it. Read [`../ROADMAP.md`](../ROADMAP.md) before touching AI code. Golden Rules: (1) never ration tokens; (2) anonymous full AI access (`optionalAuth` only on AI routes).
 
-All in `controllers/chat.controller.ts`. Uses **`@google/genai`** (unified SDK; migrated from deprecated `@google/generative-ai` in Phase 0). Default model: **`gemini-2.5-flash-lite`** (constant `MODEL_NAME`). Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`). A `generateWithRetry` wrapper retries transient network errors (the owner's ISP drops connections) — **keep it** across SDK changes.
+Entry point: `controllers/tutor.controller.ts` (`tutorChat`), logic in `services/tutor/*` + `services/lessonContext.service.ts`. Uses **`@google/genai`**. Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`). `generateWithRetry` (`services/tutor/retry.ts`) retries transient network errors (the owner's ISP drops connections) — **keep it** across SDK changes.
 
-| Endpoint | Builder | What it does |
-| --- | --- | --- |
-| `POST /ask` | `buildLearningPrompt` | Learning assistant. Inputs `{ prompt, context, userContext }` → `{ answer }`. `context` = the lesson, `userContext` = prior chat. Grounds answers in the lesson; admits when info is missing. |
-| `POST /feedback` | `buildFeedbackPrompt` | Friend-tone feedback for structured answers. Inputs include `evaluationLevel` (`correct\|almost\|incorrect`), `accuracyPercent`, `diagnostics`, `feedbackMode`. **The model must follow the provided evaluation level**, never override it. → `{ feedback }`. |
-| `POST /write-evaluate` | `buildWriteEvaluationPrompt` | Deep evaluation of open-ended answers vs a teacher `guideAnswer` (treated as a reference direction, not the only right answer). Uses `WRITE_EVAL_MODEL_NAME`. → `{ feedback }`. |
+**Request contract** (see `tutor.controller.ts` for validation):
 
-`feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The prompts enforce a warm, never-shaming tone and end with one actionable next step — **preserve that intent when editing prompts.**
+| Field | Notes |
+| --- | --- |
+| `contentId` (required) | Lesson ObjectId; server loads + serializes the lesson itself (`lessonContext.service.ts`, cached by `updatedAt`). |
+| `mode` (required) | `free_chat` \| `question_feedback` \| `write_evaluation` \| `followup`. Feedback modes wrap the final user turn with `buildFeedbackUserTurn` (the `[งานของเธอตอนนี้...]` tag that gates evaluation); `free_chat`/`followup` pass the message through untouched — that is the P1 fix. |
+| `message` (required) | 1..8000 chars. |
+| `blockId` | ≤200 chars; keys the per-block `ChatSession` for logged-in users. |
+| `clientThread` | Anonymous users' history (last 30 kept); ignored when logged in. |
+| `questionContext` | Required for feedback modes: `{ question, guideAnswer, evaluation: { level (correct\|almost\|incorrect\|ai_judge), accuracyPercent, diagnostics? ≤500 }, feedbackMode }`. `diagnostics` carries deterministic per-choice/per-blank check results. |
+| `currentSection` | Optional ≤500-char reading-position hint; appended to the final user turn (all modes). |
+
+**Response:** `{ reply, suggestions[], sessionId }` — `parseTutorReply` (`services/tutor/parse.ts`) splits the `[SUGGESTIONS]` block into up to 3 chips.
+
+**Model routing** (`resolveTutorModel`): `question_feedback` + `quick_check` → `AI_FAST_MODEL`; everything else → `AI_TUTOR_MODEL`. Persona lives in `services/tutor/persona.ts` (`buildSystemInstruction` — character, teach rules, the intent rule gating evaluation on the feedback tag, length rules, `[SUGGESTIONS]` contract, lesson + questions). `feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The persona enforces a warm, never-shaming tone — **preserve that intent when editing prompts**, and log every change in [`prompt-notes.md`](prompt-notes.md).
 
 Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_FAST_MODEL` (quick_check feedback + memory updates, default `gemini-2.5-flash-lite`), `AI_TUTOR_MODEL` (free chat / reflection / write-eval, default `gemini-2.5-flash`; legacy alias `AI_HEAVY_MODEL`; override to `gemini-3.5-flash` when available), `AI_MEMORY_EVERY_N_TURNS` (logged-in memory update cadence, default `3`), `AI_WRITE_EVAL_MODEL` (legacy write-eval override), `AI_DEBUG_PROMPTS` (`true` to log full prompts — default off), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000).
 
@@ -183,7 +188,7 @@ Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_FAST_MODEL` (quick_check
 
 ## Conventions
 
-- **Controllers are `(req: AuthRequest, res: Response) => Promise<void>`.** They validate input defensively (note the `typeof x === "string"` guards in `chat.controller.ts`), respond, and `return` early on errors.
+- **Controllers are `(req: AuthRequest, res: Response) => Promise<void>`.** They validate input defensively (note the `typeof x === "string"` guards in `tutor.controller.ts`), respond, and `return` early on errors.
 - **Validation is manual/inline** — no schema-validation library. Match that style.
 - **Errors:** throw to reach `error.middleware.ts`, or return an explicit `res.status(...).json(...)`. Existing code mostly does the latter.
 - **Mongoose access control** is done in controllers (owner/collaborator checks), not in the schema.

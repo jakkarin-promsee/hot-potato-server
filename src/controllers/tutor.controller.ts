@@ -56,6 +56,7 @@ interface QuestionContextBody {
   evaluation?: {
     level?: unknown;
     accuracyPercent?: unknown;
+    diagnostics?: unknown;
   };
   feedbackMode?: unknown;
 }
@@ -67,6 +68,7 @@ interface TutorChatBody {
   message?: unknown;
   clientThread?: unknown;
   questionContext?: unknown;
+  currentSection?: unknown;
 }
 
 function isValidObjectId(id: string): boolean {
@@ -131,6 +133,11 @@ function coerceFeedbackMode(raw: unknown): FeedbackMode {
     : "quick_check";
 }
 
+function coerceOptionalText(raw: unknown, maxLength: number): string {
+  if (typeof raw !== "string") return "";
+  return raw.trim().slice(0, maxLength);
+}
+
 function parseQuestionContext(
   raw: unknown,
   mode: TutorMode,
@@ -141,6 +148,7 @@ function parseQuestionContext(
       level: EvaluationLevel;
       accuracyPercent: number;
       feedbackMode: FeedbackMode;
+      diagnostics: string;
     } }
   | { ok: false } {
   if (mode !== "question_feedback" && mode !== "write_evaluation") {
@@ -152,6 +160,7 @@ function parseQuestionContext(
         level: "ai_judge",
         accuracyPercent: 0,
         feedbackMode: "quick_check",
+        diagnostics: "",
       },
     };
   }
@@ -171,10 +180,11 @@ function parseQuestionContext(
   const level = coerceEvaluationLevel(evaluation.level);
   const accuracyPercent = coerceAccuracyPercent(evaluation.accuracyPercent);
   const feedbackMode = coerceFeedbackMode(qc.feedbackMode);
+  const diagnostics = coerceOptionalText(evaluation.diagnostics, 500);
 
   return {
     ok: true,
-    ctx: { question, guideAnswer, level, accuracyPercent, feedbackMode },
+    ctx: { question, guideAnswer, level, accuracyPercent, feedbackMode, diagnostics },
   };
 }
 
@@ -263,6 +273,7 @@ export const tutorChat = async (
 
   const blockId = coerceBlockId(body.blockId);
   const clientThread = sanitizeClientThread(body.clientThread);
+  const currentSection = coerceOptionalText(body.currentSection, 500);
 
   const lesson = await getLessonContext(contentId);
   if (!lesson) {
@@ -321,7 +332,11 @@ export const tutorChat = async (
       accuracyPercent: qcResult.ctx.accuracyPercent,
       feedbackMode: qcResult.ctx.feedbackMode,
       studentAnswer: message,
+      diagnostics: qcResult.ctx.diagnostics,
     });
+  }
+  if (currentSection) {
+    finalUserTurn += `\n\n[ตอนนี้เพื่อนกำลังอ่าน/อยู่แถวส่วนนี้ของบทเรียน: ${currentSection}]`;
   }
 
   const model = resolveTutorModel(mode, qcResult.ctx.feedbackMode);

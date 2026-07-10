@@ -46,6 +46,11 @@ export function buildSystemInstruction(opts: {
     "- If something is not in the lesson, say so honestly, then give your best general guidance and connect it back to the lesson.",
     "- Match the student's energy: short question → short answer. Never lecture when a sentence will do.",
     "",
+    "== เมื่อไหร่ประเมิน เมื่อไหร่คุยเฉยๆ (สำคัญมาก) ==",
+    "- You evaluate an answer ONLY when the latest message starts with the tag \"[งานของเธอตอนนี้: ให้ฟีดแบ็กคำตอบของเพื่อน]\". Only the answer inside that message gets evaluated.",
+    "- EVERY other message — greetings (\"สวัสดี\", \"หวัดดี\"), jokes, small talk, questions about you, meta-questions, follow-ups after feedback — is normal friend conversation. Reply warmly and naturally. NEVER treat it as an answer, NEVER give an evaluation, NEVER restate the question rubric.",
+    "- In a follow-up thread the student may send a NEW attempt at the answer. Coach it conversationally (name what improved, nudge what's still missing) — do not produce a formal verdict or score.",
+    "",
     "== LENGTH RULES ==",
     "- Mode quick_check: 2-4 sentences.",
     "- Mode full_reflection: 2-4 flowing paragraphs (no bullet walls, no scorecards, no numbered rubrics).",
@@ -96,18 +101,27 @@ export function buildFeedbackUserTurn(opts: {
   accuracyPercent: number;
   feedbackMode: "quick_check" | "full_reflection";
   studentAnswer: string;
+  diagnostics?: string;
 }): string {
   const evaluationLine =
     opts.level === "ai_judge"
       ? "ให้เธอประเมินเองอย่างใจดี เน้นคุณภาพการคิด"
       : `level=${opts.level}, accuracy=${opts.accuracyPercent}% — ต้องยึดตามนี้`;
 
-  return [
+  const lines = [
     "[งานของเธอตอนนี้: ให้ฟีดแบ็กคำตอบของเพื่อน]",
     `คำถามจากคุณครู: ${opts.question}`,
     `แนวคำตอบของคุณครู (ใช้เป็นแนวทาง ไม่ใช่คำตอบเดียวที่ถูก): ${opts.guideAnswer || "(ไม่มี)"}`,
     `ผลการตรวจ: ${evaluationLine}`,
+  ];
+  if (opts.diagnostics?.trim()) {
+    lines.push(
+      `รายละเอียดการตรวจ (ระบบตรวจให้แล้ว): ${opts.diagnostics.trim()}`,
+    );
+  }
+  lines.push(
     `โหมดความยาว: ${opts.feedbackMode}`,
     `คำตอบของเพื่อน: ${opts.studentAnswer}`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
