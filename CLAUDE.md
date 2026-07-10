@@ -117,13 +117,17 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 ### `/api/images` — `image.controller.ts` (all 🔒)
 `GET /` · `POST /` (save metadata) · `POST /url` (save from URL) · `DELETE /:public_id` · `DELETE /` (clear all) · `PATCH /:public_id/category` — the user's Cloudinary image library.
 
-### `/api/chat` — `chat.controller.ts` + `tutor.controller.ts` 🔓 optionalAuth + rate limit
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/ask` | Grounded learning Q&A (legacy — client still uses until Phase 5) |
-| POST | `/feedback` | Feedback on a structured answer (legacy) |
-| POST | `/write-evaluate` | Deep evaluation of open-ended answer (legacy) |
-| POST | `/tutor` | **Unified tutor agent** — server-side lesson context + multi-turn history (`tutor.controller.ts`) |
+### `/api/chat` — `chat.controller.ts` + `tutor.controller.ts` + `memory.controller.ts`
+| Method | Path | Guard | Purpose |
+| --- | --- | --- | --- |
+| POST | `/ask` | 🔓 optionalAuth + rate limit | Grounded learning Q&A (legacy — client still uses until Phase 5) |
+| POST | `/feedback` | 🔓 | Feedback on a structured answer (legacy) |
+| POST | `/write-evaluate` | 🔓 | Deep evaluation of open-ended answer (legacy) |
+| POST | `/tutor` | 🔓 | **Unified tutor agent** — server-side lesson context + multi-turn history |
+| GET | `/memory` | 🔒 protect | Read the logged-in user's `StudentMemory` doc (or `{}`) |
+| DELETE | `/memory` | 🔒 protect | Wipe the logged-in user's memory sketch |
+
+**Note:** `/memory` is the only protected chat route — AI usage itself stays open (`optionalAuth` on `/tutor` and legacy endpoints).
 
 ### `/api/users` — `user.controller.ts`
 `GET /` 🔒 (list) · `POST /` 🌐 (create). `restrictTo(...roles)` exists for role-gating but is lightly used.
@@ -143,6 +147,7 @@ Defined in `models/*.model.ts`. Mongoose `timestamps` add `createdAt`/`updatedAt
 | **UserContent** | `user_id`, `content_id`, `answers: Map<blockId, any>`, `last_visited` | One row per (user, content). The **student progress / answers** tracker. Unique compound index. |
 | **LearningHistory** | `user_id`, `content_id`, `last_accessed` | One row per (user, content) for "recently opened". Unique + `(user_id, last_accessed desc)` index. Updated via `touchLearningHistory()`. |
 | **ChatSession** | `user_id`, `content_id`, `block_id`, `messages[]` | Per (user, content, block) tutor conversation. Unique compound index; pre-save hook caps at 50 messages. Logged-in only — anonymous clients pass `clientThread` per request. |
+| **StudentMemory** | `user_id` (unique), `interests[]`, `strengths[]`, `growth_areas[]`, `preferences[]`, `recent_topics[]` | One warm sketch per logged-in student (≤10 items per list, ≤120 chars each). Updated async every N student turns via `AI_FAST_MODEL` (`services/tutor/memory.ts`); injected into tutor `systemInstruction` as a digest. Anonymous users have no row. |
 | **Category** | `user_id`, `name`, `description` | Image-library folder. Unique per `(user_id, name)`. Uses `created_at` (no `updatedAt`). |
 | **Image** | `user_id`, `category_id?`, `public_id` (unique), `secure_url`, `original_filename`, `format`, `bytes`, `width`, `height` | Cloudinary image metadata. Uses `created_at` only. |
 
@@ -160,7 +165,7 @@ Login/register return `{ user, token }`; the token is a JWT signed with `JWT_SEC
 
 ## AI integration (Gemini)
 
-> **🔥 Active rework (roadmap Phase 2 next).** Phase 1 shipped `POST /api/chat/tutor` with server-side lesson context (`lessonContext.service.ts`), `ChatSession` persistence for logged-in users, and multi-turn Gemini via `systemInstruction` + `contents`. Legacy `/ask`, `/feedback`, `/write-evaluate` remain until Phase 5 client rewire. Read [`../ROADMAP.md`](../ROADMAP.md) + [`../ROADMAP-detailed.md`](../ROADMAP-detailed.md) before touching AI code. Golden Rules: (1) never ration tokens; (2) anonymous full AI access (`optionalAuth` only).
+> **🔥 Active rework (Phase 4 next).** Phase 1–3 shipped: `POST /api/chat/tutor` with server-side lesson context, `ChatSession` persistence, Phase 2 persona + `[SUGGESTIONS]`, and Phase 3 `StudentMemory` (async update + digest injection + `GET`/`DELETE /memory`). Legacy `/ask`, `/feedback`, `/write-evaluate` remain until Phase 5 client rewire. Read [`../ROADMAP.md`](../ROADMAP.md) + [`../ROADMAP-detailed.md`](../ROADMAP-detailed.md) before touching AI code. Golden Rules: (1) never ration tokens; (2) anonymous full AI access (`optionalAuth` only on AI routes).
 
 All in `controllers/chat.controller.ts`. Uses **`@google/genai`** (unified SDK; migrated from deprecated `@google/generative-ai` in Phase 0). Default model: **`gemini-2.5-flash-lite`** (constant `MODEL_NAME`). Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`). A `generateWithRetry` wrapper retries transient network errors (the owner's ISP drops connections) — **keep it** across SDK changes.
 
@@ -172,7 +177,7 @@ All in `controllers/chat.controller.ts`. Uses **`@google/genai`** (unified SDK; 
 
 `feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The prompts enforce a warm, never-shaming tone and end with one actionable next step — **preserve that intent when editing prompts.**
 
-Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_FAST_MODEL` (quick_check feedback, default `gemini-2.5-flash-lite`), `AI_TUTOR_MODEL` (free chat / reflection / write-eval, default `gemini-2.5-flash`; legacy alias `AI_HEAVY_MODEL`; override to `gemini-3.5-flash` when available), `AI_WRITE_EVAL_MODEL` (legacy write-eval override), `AI_DEBUG_PROMPTS` (`true` to log full prompts — default off), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000).
+Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_FAST_MODEL` (quick_check feedback + memory updates, default `gemini-2.5-flash-lite`), `AI_TUTOR_MODEL` (free chat / reflection / write-eval, default `gemini-2.5-flash`; legacy alias `AI_HEAVY_MODEL`; override to `gemini-3.5-flash` when available), `AI_MEMORY_EVERY_N_TURNS` (logged-in memory update cadence, default `3`), `AI_WRITE_EVAL_MODEL` (legacy write-eval override), `AI_DEBUG_PROMPTS` (`true` to log full prompts — default off), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000).
 
 **Prompt iteration:** edit persona text in `src/services/tutor/persona.ts`; log changes in [`prompt-notes.md`](prompt-notes.md) (date / what felt off / fix).
 

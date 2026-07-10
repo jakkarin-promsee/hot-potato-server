@@ -1,8 +1,13 @@
 import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { ChatSession } from "../models/chat_session.model";
+import { StudentMemory } from "../models/student_memory.model";
 import { getLessonContext } from "../services/lessonContext.service";
 import { callTutorModel } from "../services/tutor/genaiClient";
+import {
+  buildMemoryDigest,
+  runMemoryUpdate,
+} from "../services/tutor/memory";
 import { parseTutorReply } from "../services/tutor/parse";
 import {
   buildFeedbackUserTurn,
@@ -296,7 +301,16 @@ export const tutorChat = async (
     text: m.text,
   }));
 
-  const systemInstruction = buildSystemInstruction({ lesson });
+  let memoryDigest: string | undefined;
+  if (userId) {
+    const memory = await StudentMemory.findOne({
+      user_id: new Types.ObjectId(userId),
+    });
+    const digest = buildMemoryDigest(memory);
+    if (digest) memoryDigest = digest;
+  }
+
+  const systemInstruction = buildSystemInstruction({ lesson, memoryDigest });
 
   let finalUserTurn = message;
   if (mode === "question_feedback" || mode === "write_evaluation") {
@@ -335,6 +349,22 @@ export const tutorChat = async (
         { role: "tutor", text: reply, mode, createdAt: new Date() },
       );
       await session.save();
+
+      const everyN = Number(process.env.AI_MEMORY_EVERY_N_TURNS) || 3;
+      const studentTurns = session.messages.filter(
+        (m) => m.role === "student",
+      ).length;
+      if (mode === "write_evaluation" || studentTurns % everyN === 0) {
+        void runMemoryUpdate({
+          userId: new Types.ObjectId(userId),
+          contentId: new Types.ObjectId(contentId),
+          lessonTitle: lesson.title,
+          recentTurns: session.messages.slice(-6).map((m) => ({
+            role: m.role,
+            text: m.text,
+          })),
+        }).catch((e) => console.warn("memory update failed:", e));
+      }
     }
 
     res.status(200).json({
