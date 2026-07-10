@@ -9,7 +9,7 @@
     "start": "node --use-system-ca dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ai": "vitest run --config vitest.ai.config.ts"
+    "test:ai": "node --use-system-ca ./node_modules/vitest/vitest.mjs run --config vitest.ai.config.ts"
   },
   "repository": {
     "type": "git",
@@ -24,12 +24,13 @@
   },
   "homepage": "https://github.com/Jakkarin-Promsee/hot-potato-server#readme",
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^2.10.0",
     "axios": "^1.15.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.0",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.4.1"
   },

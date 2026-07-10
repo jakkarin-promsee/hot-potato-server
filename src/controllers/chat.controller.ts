@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
 interface AskChatBody {
   prompt?: unknown;
@@ -40,15 +40,14 @@ export const isTransientAIError = (e: unknown): boolean => {
 // connections for a few seconds at a time, and each Gemini call opens a fresh
 // connection, so we retry across a wide-enough window to outlast a typical
 // blip: 5 attempts, backing off 1s, 2s, 3s, 4s (~10s total) before giving up.
-export async function generateWithRetry(
-  model: GenerativeModel,
-  prompt: string,
+export async function generateWithRetry<T>(
+  call: () => Promise<T>,
   tries = 5,
-) {
+): Promise<T> {
   let last: unknown;
   for (let attempt = 1; attempt <= tries; attempt++) {
     try {
-      return await model.generateContent(prompt);
+      return await call();
     } catch (error) {
       last = error;
       if (attempt === tries || !isTransientAIError(error)) throw error;
@@ -249,11 +248,12 @@ export const askChat = async (
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+    const ai = new GoogleGenAI({ apiKey });
     const finalPrompt = buildLearningPrompt(prompt, context, userContext);
-    const result = await generateWithRetry(model, finalPrompt);
-    const answer = result.response.text().trim();
+    const result = await generateWithRetry(() =>
+      ai.models.generateContent({ model: MODEL_NAME, contents: finalPrompt }),
+    );
+    const answer = (result.text ?? "").trim();
 
     res.status(200).json({ answer });
   } catch (error) {
@@ -315,8 +315,7 @@ export const askFeedback = async (
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+    const ai = new GoogleGenAI({ apiKey });
     const prompt = buildFeedbackPrompt(
       question,
       correctAnswer,
@@ -326,9 +325,11 @@ export const askFeedback = async (
       diagnostics,
       feedbackMode,
     );
-    console.log(prompt);
-    const result = await generateWithRetry(model, prompt);
-    const feedback = result.response.text().trim();
+    if (process.env.AI_DEBUG_PROMPTS === "true") console.log(prompt);
+    const result = await generateWithRetry(() =>
+      ai.models.generateContent({ model: MODEL_NAME, contents: prompt }),
+    );
+    const feedback = (result.text ?? "").trim();
     res.status(200).json({ feedback });
   } catch (error) {
     console.error("Gemini feedback request failed:", error);
@@ -371,17 +372,21 @@ export const askWriteEvaluation = async (
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: WRITE_EVAL_MODEL_NAME });
+    const ai = new GoogleGenAI({ apiKey });
     const prompt = buildWriteEvaluationPrompt(
       question,
       guideAnswer,
       studentAnswer,
       feedbackMode,
     );
-    console.log(prompt);
-    const result = await generateWithRetry(model, prompt);
-    const feedback = result.response.text().trim();
+    if (process.env.AI_DEBUG_PROMPTS === "true") console.log(prompt);
+    const result = await generateWithRetry(() =>
+      ai.models.generateContent({
+        model: WRITE_EVAL_MODEL_NAME,
+        contents: prompt,
+      }),
+    );
+    const feedback = (result.text ?? "").trim();
     res.status(200).json({ feedback });
   } catch (error) {
     console.error("Gemini write evaluation request failed:", error);

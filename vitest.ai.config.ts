@@ -10,5 +10,7 @@ export default defineConfig({
     hookTimeout: 120000,
     // Enables the live.ai.test.ts gate without a separate shell export.
     env: { RUN_AI_TESTS: "true" },
+    // Match nodemon/dev — required on some Windows networks for Gemini TLS.
+    execArgv: ["--use-system-ca"],
   },
 });

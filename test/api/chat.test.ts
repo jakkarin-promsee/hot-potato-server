@@ -1,27 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 
-// Gemini mock (Step -1.4). vi.mock factories are hoisted, so the mock fn is
+// Gemini mock (Step 0.1). vi.mock factories are hoisted, so the mock fn is
 // created with vi.hoisted. Do not deviate from this shape.
 const { mockGenerateContent } = vi.hoisted(() => ({
-  mockGenerateContent: vi.fn(async () => ({
-    response: { text: () => "MOCK_AI_REPLY" },
-  })),
+  mockGenerateContent: vi.fn(async () => ({ text: "MOCK_AI_REPLY" })),
 }));
 
-vi.mock("@google/generative-ai", () => ({
-  GoogleGenerativeAI: class {
-    getGenerativeModel() {
-      return { generateContent: mockGenerateContent };
-    }
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    models = { generateContent: mockGenerateContent };
   },
 }));
 
 import app from "../../src/app";
 
-// The first argument passed to generateContent is the full prompt string.
+// The first argument passed to generateContent is { model, contents }.
 function capturedPrompt(): string {
-  return String(mockGenerateContent.mock.calls[0]?.[0] ?? "");
+  const arg = mockGenerateContent.mock.calls[0]?.[0] as
+    | { contents?: string }
+    | undefined;
+  return String(arg?.contents ?? "");
 }
 
 beforeEach(() => {
@@ -98,6 +97,21 @@ describe("POST /api/chat/feedback", () => {
       .post("/api/chat/feedback")
       .send({ question: "q" });
     expect(res.status).toBe(200);
+  });
+
+  it("14. does not log prompt when AI_DEBUG_PROMPTS is unset", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await request(app)
+        .post("/api/chat/feedback")
+        .send({ question: "q", userAnswer: "secret answer" });
+      const logged = logSpy.mock.calls.some((args) =>
+        String(args[0] ?? "").includes("=== Question ==="),
+      );
+      expect(logged).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
 

@@ -19,6 +19,9 @@ dotenv.config();
 
 const app = express();
 
+// Render sits behind a proxy — trust the first hop so rate-limit keys use real client IPs.
+app.set("trust proxy", 1);
+
 // Middleware
 app.use(cors());
 app.use(express.json());

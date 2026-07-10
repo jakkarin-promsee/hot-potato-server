@@ -1,15 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { GenerativeModel } from "@google/generative-ai";
 import {
   isTransientAIError,
   generateWithRetry,
 } from "../../src/controllers/chat.controller";
-
-// A minimal stand-in for the GenerativeModel — generateWithRetry only calls
-// model.generateContent(prompt).
-function fakeModel(fn: (prompt: string) => Promise<unknown>): GenerativeModel {
-  return { generateContent: fn } as unknown as GenerativeModel;
-}
 
 describe("isTransientAIError", () => {
   it("1. classifies known transient failures as retryable", () => {
@@ -44,9 +37,9 @@ describe("generateWithRetry", () => {
     const gen = vi.fn(async () => {
       n += 1;
       if (n <= 2) throw new Error("fetch failed");
-      return { response: { text: () => "ok" } };
+      return { text: "ok" };
     });
-    const p = generateWithRetry(fakeModel(gen), "prompt");
+    const p = generateWithRetry(gen);
     await vi.advanceTimersByTimeAsync(20000);
     await expect(p).resolves.toBeDefined();
     expect(gen).toHaveBeenCalledTimes(3);
@@ -56,7 +49,7 @@ describe("generateWithRetry", () => {
     const gen = vi.fn(async () => {
       throw new Error("fetch failed");
     });
-    const p = generateWithRetry(fakeModel(gen), "prompt");
+    const p = generateWithRetry(gen);
     // Attach a rejection handler synchronously so the run doesn't flag an
     // unhandled rejection while timers advance.
     const settled = expect(p).rejects.toThrow("fetch failed");
@@ -69,7 +62,7 @@ describe("generateWithRetry", () => {
     const gen = vi.fn(async () => {
       throw new Error("invalid argument");
     });
-    const p = generateWithRetry(fakeModel(gen), "prompt");
+    const p = generateWithRetry(gen);
     const settled = expect(p).rejects.toThrow("invalid argument");
     await vi.advanceTimersByTimeAsync(20000);
     await settled;

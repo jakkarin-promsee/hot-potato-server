@@ -8,7 +8,7 @@ The REST API for Hot Potato: auth, content storage, student progress, image libr
 - **Framework:** Express 5.
 - **Database:** MongoDB via **Mongoose 9**.
 - **Auth:** `jsonwebtoken` (JWT) + `bcryptjs` (password hashing).
-- **AI:** `@google/generative-ai` → Gemini.
+- **AI:** `@google/genai` → Gemini (migrated from deprecated `@google/generative-ai` in Phase 0).
 - **Dev:** `nodemon` + `ts-node` (see `nodemon.json`).
 - **Deploy:** Render (free tier — see *Gotchas*).
 
@@ -111,7 +111,7 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 ### `/api/images` — `image.controller.ts` (all 🔒)
 `GET /` · `POST /` (save metadata) · `POST /url` (save from URL) · `DELETE /:public_id` · `DELETE /` (clear all) · `PATCH /:public_id/category` — the user's Cloudinary image library.
 
-### `/api/chat` — `chat.controller.ts` 🌐 (see *AI integration*)
+### `/api/chat` — `chat.controller.ts` 🔓 optionalAuth + rate limit
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/ask` | Grounded learning Q&A (the student's free questioning) |
@@ -154,7 +154,7 @@ Login/register return `{ user, token }`; the token is a JWT signed with `JWT_SEC
 
 > **🔥 This is the active rework area (roadmap Phase 2).** What's documented below is the *current* state. The plan — one unified `POST /api/chat/tutor` endpoint with server-side lesson context, real multi-turn conversations, student memory, and a warm Thai persona — is fully specced in [`../ROADMAP.md`](../ROADMAP.md) + [`../ROADMAP-detailed.md`](../ROADMAP-detailed.md). **Read those before touching AI code.** Two Golden Rules bind everything here: (1) never ration tokens for real students — rate-limit bots only; (2) anonymous users keep full AI access (no `protect` on chat routes; `optionalAuth` only).
 
-All in `controllers/chat.controller.ts`. Uses **`@google/generative-ai`** — ⚠️ this SDK was **deprecated upstream on 2025-11-30**; roadmap Phase 0 migrates to the unified **`@google/genai`** SDK. Default model: **`gemini-2.5-flash-lite`** (constant `MODEL_NAME`). Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`). A `generateWithRetry` wrapper retries transient network errors (the owner's ISP drops connections) — **keep it** across the migration.
+All in `controllers/chat.controller.ts`. Uses **`@google/genai`** (unified SDK; migrated from deprecated `@google/generative-ai` in Phase 0). Default model: **`gemini-2.5-flash-lite`** (constant `MODEL_NAME`). Output language defaults to **Thai** (`AI_OUTPUT_LANGUAGE`). A `generateWithRetry` wrapper retries transient network errors (the owner's ISP drops connections) — **keep it** across SDK changes.
 
 | Endpoint | Builder | What it does |
 | --- | --- | --- |
@@ -164,7 +164,7 @@ All in `controllers/chat.controller.ts`. Uses **`@google/generative-ai`** — �
 
 `feedbackMode`: `quick_check` (short) | `full_reflection` (longer coaching). The prompts enforce a warm, never-shaming tone and end with one actionable next step — **preserve that intent when editing prompts.**
 
-Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` (override the write-eval model). The controllers currently `console.log` the full prompt for `feedback`/`write-evaluate` — ⚠️ this **leaks student answers into Render logs**; roadmap Phase 0.3 gates it behind `AI_DEBUG_PROMPTS=true` (default off).
+Env knobs: `AI_OUTPUT_LANGUAGE` (`thai`|`english`), `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` (override the write-eval model), `AI_DEBUG_PROMPTS` (`true` to log full prompts — default off), `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` (bot-only rate limits on `/api/chat/*`, defaults 60/1000).
 
 ## Conventions
 
@@ -188,13 +188,15 @@ Create `server/.env` (git-ignored). See [`README.md`](README.md) for description
 | `CLOUDINARY_UPLOAD_PRESET` | yes | Cloudinary unsigned preset |
 | `AI_OUTPUT_LANGUAGE` | no | `thai` (default) or `english` |
 | `AI_WRITE_EVAL_MODEL` / `AI_HEAVY_MODEL` | no | Override write-eval model |
+| `AI_DEBUG_PROMPTS` | no | `true` to log full AI prompts (default off) |
+| `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` | no | Bot-only rate limits per IP/user (defaults `60` / `1000`) |
 
 If `MONGO_URI` is bad the process **exits on boot** (`index.ts`). If `GEMINI_API_KEY` is missing, chat endpoints return 500 with a clear message.
 
 ## Gotchas
 
 - **Render cold starts.** Free tier sleeps; first request after idle is slow, on top of normal AI latency. The client must show loading states — don't treat slowness as failure.
-- **`/api/chat/*` is unauthenticated (🌐) — and stays that way for humans (Golden Rule 2).** Anonymous students *must* keep full AI access. The fix for bot/quota abuse is **not** `protect`, it's **bot-only rate limiting** with limits generous enough that no human ever hits them (roadmap Phase 0.2 adds `express-rate-limit` + `app.set("trust proxy", 1)` for Render). Do not gate AI behind login.
+- **`/api/chat/*` uses `optionalAuth` + bot-only rate limiting (Golden Rules 1 & 2).** Anonymous students *must* keep full AI access — `optionalAuth` only, never `protect`. Rate limits are keyed by IP (or user id when logged in) with generous env-tunable defaults (`AI_RATELIMIT_PER_10MIN=60`, `AI_RATELIMIT_PER_DAY=1000`). `app.set("trust proxy", 1)` ensures real client IPs behind Render's proxy.
 - **Optimistic concurrency on content update.** `PUT /content/:id` compares `clientUpdatedAt` to the server's `updatedAt` and returns **409** if the server copy is newer. The client must send `clientUpdatedAt` and handle conflicts.
 - **Denormalized author fields.** `author_name` / `collaborator_names` are recomputed via `contentAuthorSnapshot.service.ts` on create and when `collaborators` changes — `updateContent` deliberately drops client-sent values for these. If a user renames themselves, existing content's `author_name` won't auto-update.
 - **CORS is wide open** (`app.use(cors())`). Lock down origins before any real production hardening.
