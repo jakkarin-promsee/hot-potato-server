@@ -35,4 +35,20 @@ describe("/api/status", () => {
     expect(adminRes.status).toBe(200);
     expect(adminRes.body.status).toBe("ok");
   });
+
+  it("GET /api/status/env reports all required server variables", async () => {
+    const res = await request(app).get("/api/status/env");
+    expect(res.status).toBe(200);
+    expect(res.body.variables.map((v: { key: string }) => v.key)).toEqual([
+      "MONGO_URI",
+      "JWT_SECRET",
+      "JWT_EXPIRES_IN",
+      "GEMINI_API_KEY",
+      "CLOUDINARY_CLOUD_NAME",
+      "CLOUDINARY_UPLOAD_PRESET",
+    ]);
+    expect(res.body.variables.every((v: { loaded: boolean }) => v.loaded)).toBe(
+      true,
+    );
+  });
 });

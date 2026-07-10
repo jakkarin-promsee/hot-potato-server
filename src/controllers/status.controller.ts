@@ -7,8 +7,16 @@ import {
   getErrorSummaryDetailed,
 } from "../services/observability.service";
 
-// ─── Required env vars to validate ────────────────────────────────────────────
-const REQUIRED_ENV_VARS = ["PORT", "MONGO_URI", "JWT_SECRET", "JWT_EXPIRES_IN"];
+// ─── Required server env vars (presence only — values never exposed) ────────
+// Keep in sync with server/README.md and server/CLAUDE.md.
+const REQUIRED_ENV_VARS = [
+  "MONGO_URI",
+  "JWT_SECRET",
+  "JWT_EXPIRES_IN",
+  "GEMINI_API_KEY",
+  "CLOUDINARY_CLOUD_NAME",
+  "CLOUDINARY_UPLOAD_PRESET",
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
