@@ -245,6 +245,26 @@ describe("buildSystemInstruction", () => {
     expect(a).toBe(b);
   });
 
+  it("22. loanword rule: Thai output demands the 'คำไทย (คำอังกฤษ)' gloss; english omits it", () => {
+    const prev = process.env.AI_OUTPUT_LANGUAGE;
+    try {
+      process.env.AI_OUTPUT_LANGUAGE = "thai";
+      const th = buildSystemInstruction({ lesson: sampleLesson });
+      expect(th).toContain("คำทับศัพท์");
+      expect(th).toContain('"คำไทย (คำอังกฤษ)"');
+      expect(th).toContain("อิเล็กตรอน (electron)");
+      // never dropped, never left as bare English
+      expect(th).toContain("ห้ามตัดคำทับศัพท์ที่ใช้บ่อยทิ้ง");
+
+      process.env.AI_OUTPUT_LANGUAGE = "english";
+      const en = buildSystemInstruction({ lesson: sampleLesson });
+      expect(en).not.toContain("คำทับศัพท์");
+    } finally {
+      if (prev === undefined) delete process.env.AI_OUTPUT_LANGUAGE;
+      else process.env.AI_OUTPUT_LANGUAGE = prev;
+    }
+  });
+
   it("21. ordering: teacher section before personality before lesson", () => {
     const sys = buildSystemInstruction({
       lesson: sampleLesson,

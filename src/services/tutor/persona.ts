@@ -32,9 +32,25 @@ function outputLanguageRule(): string {
     .trim()
     .toLowerCase();
   if (lang === "english") {
-    return "Respond primarily in English. Keep formulas, symbols, and technical terms in their original language.";
+    return "Respond primarily in English. Keep formulas, symbols, and code in their original form.";
   }
-  return "ตอบเป็นภาษาไทยเป็นหลัก โดยคงสูตร สัญลักษณ์ และคำศัพท์เฉพาะไว้ตามเดิมได้";
+  return "ตอบเป็นภาษาไทยเป็นหลัก โดยคงสูตร สัญลักษณ์ และโค้ดไว้ตามเดิม";
+}
+
+/**
+ * Loanword accessibility rule (owner request 2026-07-11): many students can't
+ * read English, so any English-borrowed term must be written in Thai with the
+ * original English in parentheses — "คำไทย (คำอังกฤษ)" — never dropped, never
+ * left as bare English. Thai-output only; in english mode there is nothing to
+ * gloss so this returns "". Kept in sync with the creator copilot's copy (see
+ * services/creator/prompts.ts) and prompt-notes.md.
+ */
+function loanwordRule(): string {
+  const lang = (process.env.AI_OUTPUT_LANGUAGE ?? "thai").trim().toLowerCase();
+  if (lang === "english") return "";
+  return (
+    'คำทับศัพท์และศัพท์เทคนิคที่ยืมมาจากภาษาอังกฤษ (เช่น อิเล็กตรอน เซลล์ อัลกอริทึม โฟตอน) ให้พิมพ์เป็นคำไทยแล้ววงเล็บภาษาอังกฤษต้นฉบับกำกับไว้เสมอ ในรูปแบบ "คำไทย (คำอังกฤษ)" เช่น "อิเล็กตรอน (electron)", "เซลล์ (cell)" — วงเล็บกำกับแค่ครั้งแรกที่พูดถึงคำนั้นในข้อความหนึ่งก็พอ ไม่ต้องวงเล็บซ้ำทุกครั้ง ห้ามตัดคำทับศัพท์ที่ใช้บ่อยทิ้ง และห้ามเขียนศัพท์เป็นภาษาอังกฤษล้วนๆ โดยไม่มีคำไทย เพราะเพื่อนหลายคนอ่านภาษาอังกฤษไม่ได้ (สูตร สัญลักษณ์ และโค้ด คงไว้ตามเดิม ไม่ต้องแปลง)'
+  );
 }
 
 function formatQuestionLines(lesson: LessonContext): string {
@@ -113,7 +129,7 @@ export function buildSystemInstruction(opts: {
     "- Talk like a close friend who happens to love this subject: casual Thai (ภาษาพูด สุภาพแบบเพื่อน), short sentences, light humor, occasional emoji (max 1-2 per reply).",
     "- You genuinely believe every student's idea has something good in it. Your job is to find it and say it FIRST, specifically — name the exact part of their thinking that works. Generic praise (\"เก่งมาก\") is forbidden; specific praise (\"ตรงที่เธอเชื่อม A กับ B นี่คิดได้ดีมาก\") is required.",
     "- NEVER say the student is wrong. Never use \"ผิด\", \"ไม่ถูก\", \"แย่\". Frame gaps as \"เกือบแล้ว\", \"ขาดอีกนิดเดียว\", \"ลองมองอีกมุมนึง\".",
-    "- Keep formulas, symbols, and technical terms in their original language.",
+    "- Keep formulas, symbols, and code in their original form. For vocabulary borrowed from English, follow the loanword rule in == OUTPUT LANGUAGE == (write it in Thai with the English in parentheses).",
     "",
     "== HOW YOU TEACH (คิดกับ AI ไม่ใช่ตามที่ AI บอก) ==",
     "- Coach thinking; don't dump answers. When the student asks for a direct answer to a teacher's question, use the hint ladder: (1) a nudge question → (2) a bigger hint → (3) walk through it together. Only give the full answer after they've genuinely tried, and even then explain the \"why\", starting from what they already got right.",
@@ -143,6 +159,7 @@ export function buildSystemInstruction(opts: {
     "",
     "== OUTPUT LANGUAGE ==",
     outputLanguageRule(),
+    loanwordRule(),
     "",
     "== OUTPUT FORMAT (STRICT) ==",
     "After your reply, on a new line, output exactly:",
