@@ -4,14 +4,18 @@ import { User } from "../models/user.model";
 import { AuthRequest } from "../types";
 
 const generateToken = (id: string) => {
-  return jwt.sign(
-    { id },
-    process.env.JWT_SECRET as string,
-    {
-      expiresIn: process.env.JWT_EXPIRES_IN || "7d",
-    } as any,
-  );
+  const options: jwt.SignOptions = {
+    // jwt types want a ms-style StringValue; the env var is a plain string.
+    expiresIn: (process.env.JWT_EXPIRES_IN ||
+      "7d") as jwt.SignOptions["expiresIn"],
+    algorithm: "HS256",
+  };
+  return jwt.sign({ id }, process.env.JWT_SECRET as string, options);
 };
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 // POST /api/auth/register
 export const register = async (req: Request, res: Response): Promise<void> => {
@@ -36,13 +40,18 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const existingUser = await User.findOne({ email });
+  const normalizedEmail = normalizeEmail(email);
+  const existingUser = await User.findOne({ email: normalizedEmail });
   if (existingUser) {
     res.status(400).json({ message: "Email already in use" });
     return;
   }
 
-  const user = await User.create({ name, email, password });
+  const user = await User.create({
+    name: name.trim(),
+    email: normalizedEmail,
+    password,
+  });
   const token = generateToken(user._id.toString());
 
   res.status(201).json({
@@ -60,8 +69,18 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 export const login = async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body;
 
+  if (
+    typeof email !== "string" ||
+    !email.trim() ||
+    typeof password !== "string" ||
+    !password
+  ) {
+    res.status(401).json({ message: "Invalid email or password" });
+    return;
+  }
+
   // 1. Check user exists
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email: normalizeEmail(email) });
   if (!user) {
     res.status(401).json({ message: "Invalid email or password" });
     return;
@@ -101,27 +120,17 @@ export const recheckToken = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
-  if (!req.user) {
-    res.status(401).json({
-      message: "Authentication failed, please login again",
-      code: "TOKEN_INVALID",
-      forceRelogin: true,
-      clearToken: true,
-    });
-    return;
-  }
-
   // Sliding session: issue a fresh token whenever client rechecks on app entry.
-  const token = generateToken(req.user._id.toString());
+  const token = generateToken(req.user!._id.toString());
 
   res.status(200).json({
     message: "Token valid",
     token,
     user: {
-      id: req.user._id,
-      name: req.user.name,
-      email: req.user.email,
-      role: req.user.role,
+      id: req.user!._id,
+      name: req.user!.name,
+      email: req.user!.email,
+      role: req.user!.role,
     },
   });
 };
@@ -133,12 +142,12 @@ export const changePassword = async (
 ): Promise<void> => {
   const { currentPassword, newPassword } = req.body;
 
-  if (!req.user) {
-    res.status(401).json({ message: "Authentication required" });
-    return;
-  }
-
-  if (!currentPassword || !newPassword) {
+  if (
+    typeof currentPassword !== "string" ||
+    !currentPassword ||
+    typeof newPassword !== "string" ||
+    !newPassword
+  ) {
     res.status(400).json({ message: "Current password and new password are required" });
     return;
   }
@@ -155,7 +164,7 @@ export const changePassword = async (
     return;
   }
 
-  const user = await User.findById(req.user._id);
+  const user = await User.findById(req.user!._id);
   if (!user) {
     res.status(404).json({ message: "User not found" });
     return;

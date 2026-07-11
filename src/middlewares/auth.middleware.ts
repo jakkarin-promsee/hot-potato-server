@@ -1,6 +1,6 @@
 import { Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { User } from "../models/user.model";
+import { User, IUser } from "../models/user.model";
 import { AuthRequest } from "../types";
 
 type TokenErrorCode =
@@ -9,6 +9,8 @@ type TokenErrorCode =
   | "TOKEN_INVALID"
   | "USER_NOT_FOUND"
   | "ACCOUNT_INACTIVE";
+
+const JWT_VERIFY_OPTIONS: jwt.VerifyOptions = { algorithms: ["HS256"] };
 
 function sendReloginResponse(
   res: Response,
@@ -24,16 +26,29 @@ function sendReloginResponse(
   });
 }
 
+function extractBearerToken(authHeader: string | undefined): string | null {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7).trim();
+  return token || null;
+}
+
+async function loadUserFromToken(token: string): Promise<IUser | null> {
+  const decoded = jwt.verify(
+    token,
+    process.env.JWT_SECRET as string,
+    JWT_VERIFY_OPTIONS,
+  ) as { id: string };
+  return User.findById(decoded.id).select("-password");
+}
+
 export const protect = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
-
-    // 1. Check token exists
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    const token = extractBearerToken(req.headers.authorization);
+    if (!token) {
       sendReloginResponse(
         res,
         401,
@@ -43,15 +58,7 @@ export const protect = async (
       return;
     }
 
-    const token = authHeader.split(" ")[1];
-
-    // 2. Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as {
-      id: string;
-    };
-
-    // 3. Find user
-    const user = await User.findById(decoded.id).select("-password");
+    const user = await loadUserFromToken(token);
     if (!user) {
       sendReloginResponse(res, 401, "User no longer exists", "USER_NOT_FOUND");
       return;
@@ -67,7 +74,6 @@ export const protect = async (
       return;
     }
 
-    // 4. Attach user to request
     req.user = user;
     next();
   } catch (error) {
@@ -96,17 +102,12 @@ export const optionalAuth = async (
   _res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return next();
-  }
-  const token = authHeader.split(" ")[1];
+  const token = extractBearerToken(req.headers.authorization);
+  if (!token) return next();
+
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as {
-      id: string;
-    };
-    const user = await User.findById(decoded.id).select("-password");
-    if (user && user.status === "active") req.user = user;
+    const user = await loadUserFromToken(token);
+    if (user?.status === "active") req.user = user;
   } catch {
     // Invalid/expired token — treat as anonymous for public endpoints
   }

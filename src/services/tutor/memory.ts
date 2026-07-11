@@ -22,6 +22,12 @@ function clampStringList(items: unknown, cap: number): string[] {
     .slice(0, cap);
 }
 
+/** Keep existing list when the model omits a field; only replace when present. */
+function mergeMemoryList(parsed: unknown, existing: string[]): string[] {
+  if (parsed === undefined) return existing;
+  return clampStringList(parsed, MEMORY_LIST_CAP);
+}
+
 function memoryToJson(mem: IStudentMemory | null): Record<string, unknown> {
   if (!mem) {
     return {
@@ -186,10 +192,16 @@ export async function runMemoryUpdate(opts: {
 
     if (parsed.changed !== true) return;
 
-    const interests = clampStringList(parsed.interests, MEMORY_LIST_CAP);
-    const strengths = clampStringList(parsed.strengths, MEMORY_LIST_CAP);
-    const growthAreas = clampStringList(parsed.growth_areas, MEMORY_LIST_CAP);
-    const preferences = clampStringList(parsed.preferences, MEMORY_LIST_CAP);
+    const interests = mergeMemoryList(parsed.interests, current?.interests ?? []);
+    const strengths = mergeMemoryList(parsed.strengths, current?.strengths ?? []);
+    const growthAreas = mergeMemoryList(
+      parsed.growth_areas,
+      current?.growth_areas ?? [],
+    );
+    const preferences = mergeMemoryList(
+      parsed.preferences,
+      current?.preferences ?? [],
+    );
     const topicSummary =
       typeof parsed.topic_summary === "string"
         ? parsed.topic_summary.trim().slice(0, TOPIC_SUMMARY_MAX)

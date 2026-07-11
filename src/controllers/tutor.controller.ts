@@ -234,6 +234,15 @@ function coercePersonality(raw: unknown): string {
   return raw.trim().slice(0, 40) || "default";
 }
 
+function isDuplicateKeyError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code: number }).code === 11000
+  );
+}
+
 async function persistTurn(opts: {
   userId: string;
   contentId: string;
@@ -248,19 +257,45 @@ async function persistTurn(opts: {
   storedTutorPersonality?: string;
 }): Promise<InstanceType<typeof ChatSession> | null> {
   let { session } = opts;
-  if (!session) {
-    session = new ChatSession({
-      user_id: new Types.ObjectId(opts.userId),
-      content_id: new Types.ObjectId(opts.contentId),
-      block_id: opts.blockId,
-      messages: [],
-    });
+  const newMessages = [
+    {
+      role: "student" as const,
+      text: opts.message,
+      mode: opts.mode,
+      createdAt: new Date(),
+    },
+    {
+      role: "tutor" as const,
+      text: opts.reply,
+      mode: opts.mode,
+      createdAt: new Date(),
+    },
+  ];
+
+  const sessionFilter = {
+    user_id: new Types.ObjectId(opts.userId),
+    content_id: new Types.ObjectId(opts.contentId),
+    block_id: opts.blockId,
+  };
+
+  if (session) {
+    session.messages.push(...newMessages);
+    await session.save();
+  } else {
+    try {
+      session = new ChatSession({
+        ...sessionFilter,
+        messages: newMessages,
+      });
+      await session.save();
+    } catch (err) {
+      if (!isDuplicateKeyError(err)) throw err;
+      session = await ChatSession.findOne(sessionFilter);
+      if (!session) throw err;
+      session.messages.push(...newMessages);
+      await session.save();
+    }
   }
-  session.messages.push(
-    { role: "student", text: opts.message, mode: opts.mode, createdAt: new Date() },
-    { role: "tutor", text: opts.reply, mode: opts.mode, createdAt: new Date() },
-  );
-  await session.save();
 
   const everyN = Number(process.env.AI_MEMORY_EVERY_N_TURNS) || 3;
   const studentTurns = session.messages.filter((m) => m.role === "student").length;
@@ -508,13 +543,26 @@ export const tutorChat = async (
 
     const { reply, suggestions } = parseTutorReply(raw);
 
-    if (userId) {
-      session = await persistTurn({ ...persistOpts, reply, session });
-    }
+    try {
+      if (userId) {
+        session = await persistTurn({ ...persistOpts, reply, session });
+      }
 
-    if (!clientGone) {
-      send("suggestions", { suggestions });
-      send("done", { reply, sessionId: session?._id ?? null });
+      if (!clientGone) {
+        send("suggestions", { suggestions });
+        send("done", { reply, sessionId: session?._id ?? null });
+      }
+    } catch (persistError) {
+      console.error("Tutor persist failed:", persistError);
+      recordServerError({
+        method: req.method,
+        route: req.originalUrl ?? "/api/chat/tutor",
+        status: 500,
+        name: persistError instanceof Error ? persistError.name : "Error",
+      });
+      if (!clientGone) {
+        send("error", { message: "Failed to save session" });
+      }
     }
     res.end();
     return;

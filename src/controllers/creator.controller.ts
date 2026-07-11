@@ -84,6 +84,16 @@ async function callPlain(model: string, prompt: CreatorPrompt): Promise<string> 
   });
 }
 
+/** Plain-text creator actions — empty model output triggers AI_UNAVAILABLE. */
+async function callPlainNonEmpty(
+  model: string,
+  prompt: CreatorPrompt,
+): Promise<string> {
+  const text = (await callPlain(model, prompt)).trim();
+  if (!text) throw new CreatorAiInvalidError();
+  return text;
+}
+
 async function callJson<T>(
   model: string,
   prompt: CreatorPrompt,
@@ -144,12 +154,11 @@ async function runAction(
       if (preset === "reading_level" && !gradeLevel) {
         return bad("preset reading_level ต้องระบุ gradeLevel");
       }
-      const text = await callPlain(
+      const text = await callPlainNonEmpty(
         getFastModel(),
         buildProofreadPrompt({ markdown, preset, gradeLevel }),
       );
-      if (!text.trim()) throw new CreatorAiInvalidError();
-      return { ok: true, result: { markdown: text.trim() } };
+      return { ok: true, result: { markdown: text } };
     }
 
     case "generate_questions": {
@@ -204,12 +213,11 @@ async function runAction(
     case "guide_answer": {
       const question = reqStr(payload.question, 2000);
       if (!question) return bad("ต้องส่ง question (ไม่เกิน 2000 ตัวอักษร)");
-      const text = await callPlain(
+      const text = await callPlainNonEmpty(
         getTutorModel(),
         buildGuideAnswerPrompt({ lesson, question }),
       );
-      if (!text.trim()) throw new CreatorAiInvalidError();
-      return { ok: true, result: { guideAnswer: text.trim().slice(0, 2000) } };
+      return { ok: true, result: { guideAnswer: text.slice(0, 2000) } };
     }
 
     case "distractors": {
@@ -243,12 +251,11 @@ async function runAction(
       if (!topic || gradeLevel === null || objectives === null || styleHint === null) {
         return bad("ต้องส่ง topic (ไม่เกิน 200 ตัวอักษร)");
       }
-      const text = await callPlain(
+      const text = await callPlainNonEmpty(
         getTutorModel(),
         buildOutlinePrompt({ topic, gradeLevel, objectives, styleHint }),
       );
-      if (!text.trim()) throw new CreatorAiInvalidError();
-      return { ok: true, result: { outlineMarkdown: text.trim() } };
+      return { ok: true, result: { outlineMarkdown: text } };
     }
 
     case "draft_section": {
@@ -258,12 +265,11 @@ async function runAction(
       if (!heading || outlineMarkdown === null || styleHint === null) {
         return bad("ต้องส่ง heading (ไม่เกิน 200 ตัวอักษร)");
       }
-      const text = await callPlain(
+      const text = await callPlainNonEmpty(
         getTutorModel(),
         buildDraftSectionPrompt({ lesson, heading, outlineMarkdown, styleHint }),
       );
-      if (!text.trim()) throw new CreatorAiInvalidError();
-      return { ok: true, result: { markdown: text.trim() } };
+      return { ok: true, result: { markdown: text } };
     }
 
     case "import_structure": {
@@ -296,7 +302,7 @@ async function runAction(
 
     case "lesson_meta": {
       const result = await callJson(
-        getTutorModel(),
+        getFastModel(),
         buildLessonMetaPrompt({ lesson }),
         validateLessonMetaResult,
       );

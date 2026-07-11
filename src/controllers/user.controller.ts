@@ -136,7 +136,7 @@ export const updateMyProfile = async (
     userData = await UserData.findOneAndUpdate(
       { user_id: user._id },
       { $set: userDataUpdate },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: "after" },
     ).lean();
   } else {
     userData = await UserData.findOne({ user_id: user._id }).lean();

@@ -1,5 +1,6 @@
 import { Content } from "../models/content.model";
 import type { IAgentSettings } from "../models/content.model";
+import { Types } from "mongoose";
 
 export interface LessonQuestion {
   blockId: string;
@@ -379,6 +380,8 @@ export function clearLessonContextCache(): void {
 export async function getLessonContext(
   contentId: string,
 ): Promise<LessonContext | null> {
+  if (!Types.ObjectId.isValid(contentId)) return null;
+
   const content = await Content.findById(contentId).lean();
   if (!content) return null;
 

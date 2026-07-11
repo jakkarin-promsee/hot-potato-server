@@ -94,8 +94,9 @@ export const recordVisit = async (
     .map((c) => c.toString())
     .includes(uid);
   const isPublic = content.access_type === "public";
+  const isLinkOnly = content.access_type === "link-only";
 
-  if (!isPublic && !isOwner && !isCollaborator) {
+  if (!isPublic && !isLinkOnly && !isOwner && !isCollaborator) {
     res.status(403).json({ message: "No permission to view this content" });
     return;
   }

@@ -10,12 +10,14 @@ const connectDB = async (retries = 5, delayMs = 3000): Promise<void> => {
       console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
 
       // Log later drops (laptop sleep, ISP blip); the driver auto-reconnects.
-      mongoose.connection.on("disconnected", () =>
-        console.warn("⚠️  MongoDB disconnected — driver will retry"),
-      );
-      mongoose.connection.on("reconnected", () =>
-        console.log("✅ MongoDB reconnected"),
-      );
+      if (mongoose.connection.listenerCount("disconnected") === 0) {
+        mongoose.connection.on("disconnected", () =>
+          console.warn("⚠️  MongoDB disconnected — driver will retry"),
+        );
+        mongoose.connection.on("reconnected", () =>
+          console.log("✅ MongoDB reconnected"),
+        );
+      }
       return;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

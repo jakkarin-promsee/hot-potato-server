@@ -4,6 +4,10 @@ import { Content, IAgentSettings } from "../models/content.model";
 import { buildAuthorSnapshot } from "../services/contentAuthorSnapshot.service";
 import { AuthRequest } from "../types";
 
+function isValidContentId(id: unknown): id is string {
+  return typeof id === "string" && Types.ObjectId.isValid(id);
+}
+
 function sanitizeAgentSettings(raw: unknown): IAgentSettings | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
@@ -26,7 +30,13 @@ export const loadContent = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
-  const content = await Content.findById(req.query.id);
+  const id = req.query.id;
+  if (!isValidContentId(id)) {
+    res.status(400).json({ message: "Invalid content id" });
+    return;
+  }
+
+  const content = await Content.findById(id);
 
   if (!content) {
     res.status(404).json({ message: "Content not found" });
@@ -75,16 +85,26 @@ export const createBlankContent = async (
 };
 
 // PUT /api/content/:id
-// if {clientUpdatedAt:""} -> return confilct if db have lastest
-// if not -> force saving it
+// if {clientUpdatedAt:""} -> skip version check (force save)
+// if clientUpdatedAt present -> 409 when server copy is newer
 export const updateContent = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
+  const contentId = req.params.id;
+  if (!isValidContentId(contentId)) {
+    res.status(400).json({ message: "Invalid content id" });
+    return;
+  }
+
   const {
     clientUpdatedAt,
     author_name: _dropAuthor,
     collaborator_names: _dropCollabNames,
+    owner_id: _dropOwner,
+    createdAt: _dropCreated,
+    updatedAt: _dropUpdated,
+    _id: _dropId,
     agent_settings,
     ...rest
   } = req.body;
@@ -97,14 +117,24 @@ export const updateContent = async (
     }
   }
 
-  const content = await Content.findById(req.params.id);
+  const content = await Content.findById(contentId);
 
   if (!content) {
     res.status(404).json({ message: "Content not found" });
     return;
   }
 
-  // ── Version check ──────────────────────────────────────────────
+  const isOwner = content.owner_id.toString() === req.user!._id.toString();
+  const isCollaborator = content.collaborators
+    .map((c) => c.toString())
+    .includes(req.user!._id.toString());
+
+  if (!isOwner && !isCollaborator) {
+    res.status(403).json({ message: "No permission to edit this content" });
+    return;
+  }
+
+  // ── Version check (authorized editors only) ────────────────────
   if (clientUpdatedAt) {
     const serverTime = new Date(content.updatedAt).getTime();
     const clientTime = new Date(clientUpdatedAt).getTime();
@@ -118,28 +148,28 @@ export const updateContent = async (
     }
   }
 
-  const isOwner = content.owner_id.toString() === req.user!._id.toString();
-  const isCollaborator = content.collaborators
-    .map((c) => c.toString())
-    .includes(req.user!._id.toString());
-
-  if (!isOwner && !isCollaborator) {
-    res.status(403).json({ message: "No permission to edit this content" });
-    return;
-  }
-
   // Recompute denormalized author fields when collaborators[] changes
   if (Object.prototype.hasOwnProperty.call(updateData, "collaborators")) {
     const raw = updateData["collaborators"];
-    const collabIds = Array.isArray(raw)
-      ? raw.map((id: unknown) => new Types.ObjectId(String(id)))
-      : [];
+    if (!Array.isArray(raw)) {
+      res.status(400).json({ message: "collaborators must be an array" });
+      return;
+    }
+    const collabIds: Types.ObjectId[] = [];
+    for (const id of raw) {
+      const s = String(id);
+      if (!Types.ObjectId.isValid(s)) {
+        res.status(400).json({ message: "Invalid collaborator id" });
+        return;
+      }
+      collabIds.push(new Types.ObjectId(s));
+    }
     const snap = await buildAuthorSnapshot(content.owner_id, collabIds);
     updateData["author_name"] = snap.author_name;
     updateData["collaborator_names"] = snap.collaborator_names;
   }
 
-  const updated = await Content.findByIdAndUpdate(req.params.id, updateData, {
+  const updated = await Content.findByIdAndUpdate(contentId, updateData, {
     returnDocument: "after",
   });
 
@@ -151,7 +181,13 @@ export const deleteContent = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
-  const content = await Content.findById(req.params.id);
+  const contentId = req.params.id;
+  if (!isValidContentId(contentId)) {
+    res.status(400).json({ message: "Invalid content id" });
+    return;
+  }
+
+  const content = await Content.findById(contentId);
 
   if (!content) {
     res.status(404).json({ message: "Content not found" });
@@ -165,7 +201,7 @@ export const deleteContent = async (
     return;
   }
 
-  await Content.findByIdAndDelete(req.params.id);
+  await Content.findByIdAndDelete(contentId);
   res.json({ message: "Content deleted" });
 };
 
@@ -188,7 +224,8 @@ export const searchContent = async (
       { owner_id: req.user!._id },
       { collaborators: req.user!._id },
     ];
-  } else if (explore === "true") {
+  } else {
+    // Non-mine searches are public catalog only (explore or title search)
     filter["access_type"] = "public";
   }
 

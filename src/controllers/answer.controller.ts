@@ -4,14 +4,24 @@ import { UserContent } from "../models/user_content.model";
 import { touchLearningHistory } from "../services/learningHistory.service";
 import { AuthRequest } from "../types";
 
+function isValidContentId(id: unknown): id is string {
+  return typeof id === "string" && Types.ObjectId.isValid(id);
+}
+
 // GET /api/answer/:contentId
 export const getAnswers = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
+  const contentId = req.params.contentId;
+  if (!isValidContentId(contentId)) {
+    res.status(400).json({ message: "Invalid content id" });
+    return;
+  }
+
   const userContent = await UserContent.findOne({
     user_id: req.user!._id,
-    content_id: req.params.contentId,
+    content_id: contentId,
   });
 
   // Return empty answers if first visit — not an error
@@ -23,6 +33,12 @@ export const saveAnswer = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
+  const contentId = req.params.contentId;
+  if (!isValidContentId(contentId)) {
+    res.status(400).json({ message: "Invalid content id" });
+    return;
+  }
+
   const { blockId, answer } = req.body;
 
   if (!blockId) {
@@ -33,7 +49,7 @@ export const saveAnswer = async (
   await UserContent.findOneAndUpdate(
     {
       user_id: req.user!._id,
-      content_id: req.params.contentId,
+      content_id: contentId,
     },
     {
       $set: {
@@ -46,7 +62,7 @@ export const saveAnswer = async (
 
   await touchLearningHistory(
     req.user!._id,
-    new Types.ObjectId(String(req.params.contentId)),
+    new Types.ObjectId(contentId),
   );
 
   res.json({ success: true });
@@ -57,17 +73,23 @@ export const bulkSaveAnswers = async (
   req: AuthRequest,
   res: Response,
 ): Promise<void> => {
+  const contentId = req.params.contentId;
+  if (!isValidContentId(contentId)) {
+    res.status(400).json({ message: "Invalid content id" });
+    return;
+  }
+
   const { answers } = req.body;
 
   await UserContent.findOneAndUpdate(
-    { user_id: req.user!._id, content_id: req.params.contentId },
+    { user_id: req.user!._id, content_id: contentId },
     { $set: { answers, last_visited: new Date() } },
     { upsert: true, returnDocument: "after" },
   );
 
   await touchLearningHistory(
     req.user!._id,
-    new Types.ObjectId(String(req.params.contentId)),
+    new Types.ObjectId(contentId),
   );
 
   res.json({ success: true });

@@ -1,7 +1,13 @@
 import { Response } from "express";
+import mongoose from "mongoose";
 import { Category } from "../models/category.model";
 import { Image } from "../models/image.model";
 import { AuthRequest } from "../types";
+
+function parseCategoryParam(id: unknown): string | null {
+  if (typeof id !== "string" || !mongoose.isValidObjectId(id)) return null;
+  return id;
+}
 
 // GET /categories
 export const getCategories = async (
@@ -52,10 +58,27 @@ export const updateCategory = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const categoryId = parseCategoryParam(req.params.id);
+    if (!categoryId) {
+      res.status(400).json({ message: "Invalid category id" });
+      return;
+    }
+
     const { name, description } = req.body;
+    if (name !== undefined) {
+      if (typeof name !== "string" || !name.trim()) {
+        res.status(400).json({ message: "name cannot be empty" });
+        return;
+      }
+    }
+
+    const update: { name?: string; description?: unknown } = {};
+    if (name !== undefined) update.name = name.trim();
+    if (description !== undefined) update.description = description;
+
     const category = await Category.findOneAndUpdate(
-      { _id: req.params.id, user_id: req.user!._id },
-      { name: name?.trim(), description },
+      { _id: categoryId, user_id: req.user!._id },
+      update,
       { new: true, runValidators: true },
     );
     if (!category) {
@@ -78,8 +101,14 @@ export const deleteCategory = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const categoryId = parseCategoryParam(req.params.id);
+    if (!categoryId) {
+      res.status(400).json({ message: "Invalid category id" });
+      return;
+    }
+
     const category = await Category.findOneAndDelete({
-      _id: req.params.id,
+      _id: categoryId,
       user_id: req.user!._id,
     });
     if (!category) {
@@ -87,13 +116,13 @@ export const deleteCategory = async (
       return;
     }
 
-    // Unlink images that belonged to this category
+    // Unlink this user's images that belonged to this category
     await Image.updateMany(
-      { category_id: category._id },
+      { category_id: category._id, user_id: req.user!._id },
       { $set: { category_id: null } },
     );
 
-    res.json({ message: "Deleted", id: req.params.id });
+    res.json({ message: "Deleted", id: categoryId });
   } catch {
     res.status(500).json({ message: "Failed to delete category" });
   }
@@ -105,9 +134,24 @@ export const getImagesByCategory = async (
   res: Response,
 ): Promise<void> => {
   try {
+    const categoryId = parseCategoryParam(req.params.id);
+    if (!categoryId) {
+      res.status(400).json({ message: "Invalid category id" });
+      return;
+    }
+
+    const category = await Category.findOne({
+      _id: categoryId,
+      user_id: req.user!._id,
+    });
+    if (!category) {
+      res.status(404).json({ message: "Category not found" });
+      return;
+    }
+
     const images = await Image.find({
       user_id: req.user!._id,
-      category_id: req.params.id,
+      category_id: categoryId,
     })
       .sort({ created_at: -1 })
       .lean();

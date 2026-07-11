@@ -20,6 +20,14 @@ const REQUIRED_ENV_VARS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function checkRequiredEnv(): { checks: { key: string; loaded: boolean }[]; allLoaded: boolean } {
+  const checks = REQUIRED_ENV_VARS.map((key) => ({
+    key,
+    loaded: key in process.env && process.env[key] !== "",
+  }));
+  return { checks, allLoaded: checks.every((c) => c.loaded) };
+}
+
 function mongoStateLabel(state: number): string {
   return (
     ["disconnected", "connected", "connecting", "disconnecting"][state] ??
@@ -36,6 +44,7 @@ function uptimeFormatted(seconds: number): string {
 
 // ─── GET /api/status/ ─────────────────────────────────────────────────────────
 export const getServerStatus = (_req: Request, res: Response): void => {
+  const mem = process.memoryUsage();
   res.status(200).json({
     status: "ok",
     message: "Server is running",
@@ -44,9 +53,9 @@ export const getServerStatus = (_req: Request, res: Response): void => {
     environment: process.env.NODE_ENV ?? "unknown",
     node_version: process.version,
     memory: {
-      rss_mb: (process.memoryUsage().rss / 1024 / 1024).toFixed(2),
-      heap_used_mb: (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2),
-      heap_total_mb: (process.memoryUsage().heapTotal / 1024 / 1024).toFixed(2),
+      rss_mb: (mem.rss / 1024 / 1024).toFixed(2),
+      heap_used_mb: (mem.heapUsed / 1024 / 1024).toFixed(2),
+      heap_total_mb: (mem.heapTotal / 1024 / 1024).toFixed(2),
     },
     platform: os.platform(),
     hostname: os.hostname(),
@@ -71,12 +80,7 @@ export const getDatabaseStatus = (_req: Request, res: Response): void => {
 
 // ─── GET /api/status/env ──────────────────────────────────────────────────────
 export const getEnvStatus = (_req: Request, res: Response): void => {
-  const checks = REQUIRED_ENV_VARS.map((key) => ({
-    key,
-    loaded: key in process.env && process.env[key] !== "",
-  }));
-
-  const allLoaded = checks.every((c) => c.loaded);
+  const { checks, allLoaded } = checkRequiredEnv();
 
   res.status(allLoaded ? 200 : 500).json({
     status: allLoaded ? "ok" : "error",
@@ -97,11 +101,7 @@ export const getAllStatus = (_req: Request, res: Response): void => {
   const dbOk = dbState === 1;
 
   // Env
-  const envChecks = REQUIRED_ENV_VARS.map((key) => ({
-    key,
-    loaded: key in process.env && process.env[key] !== "",
-  }));
-  const envOk = envChecks.every((c) => c.loaded);
+  const { checks: envChecks, allLoaded: envOk } = checkRequiredEnv();
 
   // Overall status stays server+db+env only: one failed AI call or a recorded
   // error is information, not an outage — the AI card carries its own badge,

@@ -1,7 +1,25 @@
 import { Response } from "express";
+import mongoose from "mongoose";
+import axios from "axios";
+import { Category } from "../models/category.model";
 import { Image } from "../models/image.model";
 import { AuthRequest } from "../types";
-import axios from "axios";
+
+/** Resolve category_id for writes — null clears; invalid or foreign → error. */
+async function resolveOwnedCategoryId(
+  userId: mongoose.Types.ObjectId,
+  categoryId: unknown,
+): Promise<{ ok: true; id: mongoose.Types.ObjectId | null } | { ok: false }> {
+  if (categoryId === undefined || categoryId === null) {
+    return { ok: true, id: null };
+  }
+  if (typeof categoryId !== "string" || !mongoose.isValidObjectId(categoryId)) {
+    return { ok: false };
+  }
+  const category = await Category.findOne({ _id: categoryId, user_id: userId });
+  if (!category) return { ok: false };
+  return { ok: true, id: category._id };
+}
 
 // GET /images — all images for the logged-in user (latest first)
 export const getImages = async (
@@ -37,13 +55,16 @@ export const saveImage = async (
     } = req.body;
 
     if (!public_id || !secure_url) {
-      res
-        .status(400)
-        .json({ message: "public_id, url, and secure_url are required" });
+      res.status(400).json({ message: "public_id and secure_url are required" });
       return;
     }
 
-    // Guard: one user can't overwrite another user's record
+    const category = await resolveOwnedCategoryId(req.user!._id, category_id);
+    if (!category.ok) {
+      res.status(400).json({ message: "Invalid category id" });
+      return;
+    }
+
     const existing = await Image.findOne({ public_id });
     if (existing) {
       res.status(409).json({ message: "Image already saved" });
@@ -59,7 +80,7 @@ export const saveImage = async (
       bytes,
       width,
       height,
-      category_id: category_id ?? null,
+      category_id: category.id,
     });
 
     res.status(201).json(image);
@@ -78,6 +99,12 @@ export const saveImageFromUrl = async (
 
     if (!url?.trim()) {
       res.status(400).json({ message: "url is required" });
+      return;
+    }
+
+    const category = await resolveOwnedCategoryId(req.user!._id, category_id);
+    if (!category.ok) {
+      res.status(400).json({ message: "Invalid category id" });
       return;
     }
 
@@ -116,7 +143,7 @@ export const saveImageFromUrl = async (
       bytes: cloudinary.bytes,
       width: cloudinary.width,
       height: cloudinary.height,
-      category_id: category_id ?? null,
+      category_id: category.id,
     });
 
     res.status(201).json(image);
@@ -171,9 +198,15 @@ export const assignCategory = async (
     const public_id = decodeURIComponent(req.params.public_id as string);
     const { category_id } = req.body; // null = remove from category
 
+    const category = await resolveOwnedCategoryId(req.user!._id, category_id);
+    if (!category.ok) {
+      res.status(400).json({ message: "Invalid category id" });
+      return;
+    }
+
     const image = await Image.findOneAndUpdate(
       { public_id, user_id: req.user!._id },
-      { $set: { category_id: category_id ?? null } },
+      { $set: { category_id: category.id } },
       { new: true },
     );
     if (!image) {

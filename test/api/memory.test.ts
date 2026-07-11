@@ -131,7 +131,34 @@ describe("runMemoryUpdate (direct)", () => {
     }
   });
 
-  it("4. model throws → resolves without throwing; no doc", async () => {
+  it("4. changed: true with omitted lists preserves existing fields", async () => {
+    mockMemoryJson({
+      changed: true,
+      topic_summary: "ถามเรื่องแสง",
+    });
+    const { user } = await seedUser();
+    await StudentMemory.create({
+      user_id: user._id,
+      interests: ["ฟุตบอล"],
+      strengths: ["คิดเป็น"],
+      growth_areas: [],
+      preferences: [],
+      recent_topics: [],
+    });
+    const lesson = await seedLesson(user._id);
+    await runMemoryUpdate({
+      userId: user._id,
+      contentId: lesson._id,
+      lessonTitle: lesson.title,
+      recentTurns: [{ role: "student", text: "test" }],
+    });
+    const mem = await StudentMemory.findOne({ user_id: user._id });
+    expect(mem?.interests).toEqual(["ฟุตบอล"]);
+    expect(mem?.strengths).toEqual(["คิดเป็น"]);
+    expect(mem?.recent_topics[0].summary).toBe("ถามเรื่องแสง");
+  });
+
+  it("5. model throws → resolves without throwing; no doc", async () => {
     mockGenerateContent.mockRejectedValue(new Error("boom"));
     const { user } = await seedUser();
     const lesson = await seedLesson(user._id);
@@ -165,7 +192,7 @@ describe("POST /api/chat/tutor memory integration", () => {
       });
   }
 
-  it("5. logged-in turn #3 triggers memory update", async () => {
+  it("6. logged-in turn #3 triggers memory update", async () => {
     mockMemoryJson({
       changed: true,
       interests: ["ฟุตบอล"],
@@ -183,7 +210,7 @@ describe("POST /api/chat/tutor memory integration", () => {
     });
   });
 
-  it("6. turns #1 and #2 do not trigger memory update", async () => {
+  it("7. turns #1 and #2 do not trigger memory update", async () => {
     mockMemoryJson({
       changed: true,
       interests: ["should-not-save"],
@@ -197,7 +224,7 @@ describe("POST /api/chat/tutor memory integration", () => {
     expect(await StudentMemory.countDocuments()).toBe(0);
   });
 
-  it("7. anonymous tutor turns never create memory", async () => {
+  it("8. anonymous tutor turns never create memory", async () => {
     mockMemoryJson({
       changed: true,
       interests: ["anon"],
@@ -217,7 +244,7 @@ describe("POST /api/chat/tutor memory integration", () => {
     expect(await StudentMemory.countDocuments()).toBe(0);
   });
 
-  it("8. existing memory → systemInstruction contains memory header and value", async () => {
+  it("9. existing memory → systemInstruction contains memory header and value", async () => {
     const { user, token } = await seedUser();
     const lesson = await seedLesson(user._id, { access_type: "public" });
     await StudentMemory.create({
@@ -234,7 +261,7 @@ describe("POST /api/chat/tutor memory integration", () => {
     expect(sys).toContain("ฟุตบอล");
   });
 
-  it("9. no memory → systemInstruction omits memory header", async () => {
+  it("10. no memory → systemInstruction omits memory header", async () => {
     const { user, token } = await seedUser();
     const lesson = await seedLesson(user._id, { access_type: "public" });
     await tutorTurn(token, lesson._id.toString(), "สวัสดี");
@@ -244,13 +271,13 @@ describe("POST /api/chat/tutor memory integration", () => {
 });
 
 describe("GET/DELETE /api/chat/memory", () => {
-  it("10. GET without token → 401 TOKEN_MISSING", async () => {
+  it("11. GET without token → 401 TOKEN_MISSING", async () => {
     const res = await request(app).get("/api/chat/memory");
     expect(res.status).toBe(401);
     expect(res.body.code).toBe("TOKEN_MISSING");
   });
 
-  it("11. DELETE then GET → memory gone", async () => {
+  it("12. DELETE then GET → memory gone", async () => {
     const { user, token } = await seedUser();
     await StudentMemory.create({
       user_id: user._id,

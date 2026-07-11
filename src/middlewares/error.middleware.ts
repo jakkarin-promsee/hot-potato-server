@@ -7,6 +7,11 @@ export const errorHandler = (
   res: Response,
   next: NextFunction,
 ): void => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
   console.error(err.stack ?? err);
   recordServerError({
     method: req?.method ?? "UNKNOWN",
