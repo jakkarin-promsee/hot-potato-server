@@ -12,6 +12,8 @@ export async function callTutorModel(opts: {
   systemInstruction: string;
   history: TutorTurn[];
   message: string;
+  /** Gemini JSON mode — used by creator-assist JSON actions (Tier 3.5). */
+  responseMimeType?: "application/json";
 }): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -23,12 +25,18 @@ export async function callTutorModel(opts: {
     ...opts.history.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
     { role: "user" as const, parts: [{ text: opts.message }] },
   ];
+  // When responseMimeType is omitted the config stays identical to before the
+  // Tier 3.5 extension — tutor callers are unaffected (regression-tested).
+  const config: { systemInstruction: string; responseMimeType?: string } = {
+    systemInstruction: opts.systemInstruction,
+  };
+  if (opts.responseMimeType) config.responseMimeType = opts.responseMimeType;
   try {
     const result = await generateWithRetry(() =>
       ai.models.generateContent({
         model: opts.model,
         contents,
-        config: { systemInstruction: opts.systemInstruction },
+        config,
       }),
     );
     recordAiSuccess();

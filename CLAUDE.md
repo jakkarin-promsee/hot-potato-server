@@ -65,6 +65,10 @@ server/src/
 │   ├── learningHistory.service.ts         # touchLearningHistory(user, content)
 │   ├── lessonContext.service.ts           # load + serialize lesson from tiptap_json (cached)
 │   ├── observability.service.ts           # in-memory error ring buffer + AI health (Tier 1.A; wiped on restart — by design)
+│   ├── creator/                           # teacher AI copilot (Tier 3.5)
+│   │   ├── prompts.ts                     # build<Action>Prompt per creator action (NOT the tutor persona)
+│   │   ├── parse.ts                       # tolerant JSON extractor + one-retry askJson
+│   │   └── validate.ts                    # server-side validation of generated blocks/JSON results
 │   └── tutor/                             # unified tutor agent (Phase 1+)
 │       ├── genaiClient.ts                 # callTutorModel + callTutorModelStream
 │       ├── parse.ts                       # parseTutorReply + createSuggestionsGate
@@ -127,6 +131,13 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 | DELETE | `/memory` | 🔒 protect | Wipe the logged-in user's memory sketch |
 
 **Note:** `/memory` is the only protected chat route — AI usage itself stays open (`optionalAuth` on `/tutor`). The legacy `/ask`, `/feedback`, `/write-evaluate` endpoints and `chat.controller.ts` were **deleted in Tier 0 Phase 0.A** (2026-07-10); every client flow now calls `/tutor`.
+
+### `/api/creator` — `creator.controller.ts` (Tier 3.5)
+| Method | Path | Guard | Purpose |
+| --- | --- | --- | --- |
+| POST | `/assist` | 🔒 protect + rate limit + owner/collaborator check | **Teacher AI copilot** — one endpoint, 11 actions via `{ contentId, action, payload }`: `formula_latex`, `proofread` (6 presets), `generate_questions`, `guide_answer`, `distractors`, `outline`, `draft_section`, `import_structure`, `critic`, `lesson_meta`, `agent_settings_suggest`. Returns `200 { result }`. JSON actions use Gemini JSON mode + tolerant parse with one retry → `500 { code: "AI_UNAVAILABLE" }`. |
+
+**Teacher-only by design** — this is the one AI surface that is `protect`ed (the student AI stays `optionalAuth`, Golden Rule 2). Model routing: fast model for `formula_latex`/`proofread`/`distractors`/`lesson_meta`, tutor model for the rest. Prompts live in `services/creator/prompts.ts` (separate from the tone-gated tutor persona); generated question JSON is validated server-side (`services/creator/validate.ts` — malformed items dropped, never raw TipTap JSON).
 
 ### `/api/users` — `user.controller.ts`
 | Method | Path | Guard | Purpose |
@@ -236,6 +247,7 @@ If `MONGO_URI` is bad the process **exits on boot** (`index.ts`). If `GEMINI_API
 
 - **Render cold starts.** Free tier sleeps; first request after idle is slow, on top of normal AI latency. The client must show loading states — don't treat slowness as failure.
 - **Observability is in-memory.** The error ring buffer + AI health on `/status/all` reset on every restart (Render free tier restarts often). Never store `err.message` or request bodies in it — names/routes/codes only, and names are admin-only.
+- **`/api/creator/assist` is teacher-only; the student AI stays `optionalAuth`.** Never swap those guards. The creator route gets its own rate-limiter instances (the factory creates fresh buckets), so teacher AI usage never eats the student chat budget.
 - **`/api/chat/*` uses `optionalAuth` + bot-only rate limiting (Golden Rules 1 & 2).** Anonymous students *must* keep full AI access — `optionalAuth` only, never `protect`. Rate limits are keyed by IP (or user id when logged in) with generous env-tunable defaults (`AI_RATELIMIT_PER_10MIN=60`, `AI_RATELIMIT_PER_DAY=1000`). `app.set("trust proxy", 1)` ensures real client IPs behind Render's proxy.
 - **Optimistic concurrency on content update.** `PUT /content/:id` compares `clientUpdatedAt` to the server's `updatedAt` and returns **409** if the server copy is newer. The client must send `clientUpdatedAt` and handle conflicts.
 - **Denormalized author fields.** `author_name` / `collaborator_names` are recomputed via `contentAuthorSnapshot.service.ts` on create and when `collaborators` changes — `updateContent` deliberately drops client-sent values for these. **Renames propagate** via `refreshAuthorSnapshotsForUser()` when a user updates their display name through `PUT /api/users/me/profile` (Tier 2.A).

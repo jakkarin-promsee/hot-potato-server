@@ -11,6 +11,7 @@ import imageRoutes from "./routes/image.routes";
 import categoryRoutes from "./routes/category.routes";
 import historyRoutes from "./routes/history.routes";
 import chatRoutes from "./routes/chat.routes";
+import creatorRoutes from "./routes/creator.routes";
 
 // Harmless at import time; several module-load constants (e.g. in the chat
 // controller) read env, so keep dotenv here. DB connection + app.listen live
@@ -66,6 +67,8 @@ app.use("/api/history", historyRoutes);
 app.use("/api/content-answer", answerRoutes);
 
 app.use("/api/chat", chatRoutes);
+
+app.use("/api/creator", creatorRoutes);
 
 // Error Handler (must be last)
 app.use(errorHandler);
