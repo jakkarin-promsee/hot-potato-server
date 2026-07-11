@@ -34,7 +34,7 @@ Two product principles shape the API design:
 - **Unified AI tutor endpoint** — a single `POST /api/chat/tutor` serves four conversation modes (free chat, question feedback, writing evaluation, follow-up). Supports Server-Sent Events streaming with a plain-JSON fallback, follow-up suggestion chips, six student-selectable tutor personalities, and per-lesson teacher controls (persona note, answer-directness, scope, custom guidelines).
 - **Teacher AI copilot** — `POST /api/creator/assist` exposes eleven authoring actions (outline, section drafting, structure import, proofreading with six presets, question generation, guide answers, distractors, lesson critic, publish metadata, tutor-settings suggestions). Generated JSON is validated server-side before it ever reaches the editor.
 - **Server-owned lesson context** — the server loads and serializes the lesson document for every AI call (cached by `updatedAt`), so clients never ship lesson text over the wire.
-- **Student memory** — for logged-in students, a background job periodically distills conversations into a small personalization sketch (interests, strengths, growth areas) that is injected into the tutor's system instruction. Fully viewable and erasable by the student.
+- **Student memory** — for logged-in students, a background job periodically distills conversations into a small personalization sketch (interests, strengths, growth areas) that is injected into the tutor's system instruction. Fully viewable and erasable by the student. _(Shelved by default since 2026-07-12 — enable with `AI_MEMORY_ENABLED=true`.)_
 - **Authentication** — JWT sessions with bcrypt-hashed passwords, Google Sign-In via verified Google Identity Services ID tokens (find-or-create with safe auto-linking by verified email), role-based guards (`admin` / `creator` / `learner`), and a structured 401 contract the client uses for automatic logout.
 - **Lesson storage** — TipTap documents stored per lesson with `public` / `link-only` / `private` access levels, collaborator support, denormalized author snapshots that propagate on rename, and optimistic-concurrency updates (409 on conflict).
 - **Resilience** — transient AI network errors are retried; model routing sends lightweight tasks to a fast model and coaching tasks to a stronger one; rate limiters are per-surface so teacher AI usage never consumes the student budget.
@@ -162,7 +162,7 @@ The tutor lives in `src/services/tutor/` and `src/controllers/tutor.controller.t
 - **Persona** — a system instruction built per request from the tutor character (warm, coaching, never shaming), teach rules, the lesson content and its questions, the teacher's per-lesson settings, the student's chosen personality preset, and the student's memory digest.
 - **Modes** — feedback modes wrap the student's turn with an evaluation task (the client sends deterministic per-choice/per-blank diagnostics; open-ended answers are judged by the model); `free_chat` and `followup` pass messages through untouched so casual conversation stays casual.
 - **Streaming** — SSE with typed events; the non-streaming JSON path shares the same parsing (reply + up to three suggestion chips).
-- **Model routing** — quick-check feedback uses a fast model (`gemini-2.5-flash-lite` by default); free chat, reflection, and writing evaluation use the stronger tutor model (`gemini-3.5-flash` by default). Both are environment-configurable.
+- **Model routing** — quick-check feedback uses a fast model (`gemini-2.5-flash-lite` by default); free chat, reflection, and writing evaluation use the tutor model (`gemini-2.5-flash` by default — switched from `gemini-3.5-flash` on 2026-07-12 for output cost; set `AI_TUTOR_MODEL=gemini-3.5-flash` to flip back). Both are environment-configurable.
 - **Retry** — transient network failures are retried with backoff before surfacing an error.
 
 The teacher copilot (`src/services/creator/`) uses Gemini's JSON mode with a tolerant parser and a single retry; generated question blocks are schema-validated server-side and malformed items are dropped, so the editor never receives raw untrusted JSON.
@@ -226,8 +226,9 @@ AI_OUTPUT_LANGUAGE=thai
 | `CORS_ORIGINS` | no | Comma-separated allowed browser origins; unset = open (dev only, boot warning) |
 | `AI_OUTPUT_LANGUAGE` | no | `thai` (default) or `english` |
 | `AI_FAST_MODEL` | no | Model for quick feedback + memory updates (default `gemini-2.5-flash-lite`) |
-| `AI_TUTOR_MODEL` | no | Model for free chat / reflection / writing evaluation (default `gemini-3.5-flash`) |
-| `AI_MEMORY_EVERY_N_TURNS` | no | Student-memory update cadence (default `3`) |
+| `AI_TUTOR_MODEL` | no | Model for free chat / reflection / writing evaluation (default `gemini-2.5-flash`; set `gemini-3.5-flash` to switch back to the premium model) |
+| `AI_MEMORY_ENABLED` | no | Student-memory master switch — **default off / shelved**; set `true` to resume the sketch updates + digest injection |
+| `AI_MEMORY_EVERY_N_TURNS` | no | Student-memory update cadence when enabled (default `3`) |
 | `AI_RATELIMIT_PER_10MIN` / `AI_RATELIMIT_PER_DAY` | no | Bot-only AI rate limits (defaults `60` / `1000`) |
 | `AUTH_RATELIMIT_PER_10MIN` | no | Bot guard on login/register per IP (default `100`) |
 

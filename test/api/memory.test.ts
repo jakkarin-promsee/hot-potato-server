@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import { Types } from "mongoose";
 
@@ -174,23 +174,35 @@ describe("runMemoryUpdate (direct)", () => {
   });
 });
 
-describe("POST /api/chat/tutor memory integration", () => {
-  async function tutorTurn(
-    token: string,
-    contentId: string,
-    message: string,
-    blockId = "mem-block",
-  ) {
-    return request(app)
-      .post("/api/chat/tutor")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        contentId,
-        blockId,
-        mode: "free_chat",
-        message,
-      });
-  }
+async function tutorTurn(
+  token: string,
+  contentId: string,
+  message: string,
+  blockId = "mem-block",
+) {
+  return request(app)
+    .post("/api/chat/tutor")
+    .set("Authorization", `Bearer ${token}`)
+    .send({
+      contentId,
+      blockId,
+      mode: "free_chat",
+      message,
+    });
+}
+
+describe("POST /api/chat/tutor memory integration (feature enabled)", () => {
+  // Memory is shelved by default (AI_MEMORY_ENABLED off); these tests exercise
+  // the feature as it behaves when a deploy turns it back on.
+  let prevFlag: string | undefined;
+  beforeEach(() => {
+    prevFlag = process.env.AI_MEMORY_ENABLED;
+    process.env.AI_MEMORY_ENABLED = "true";
+  });
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.AI_MEMORY_ENABLED;
+    else process.env.AI_MEMORY_ENABLED = prevFlag;
+  });
 
   it("6. logged-in turn #3 triggers memory update", async () => {
     mockMemoryJson({
@@ -267,6 +279,52 @@ describe("POST /api/chat/tutor memory integration", () => {
     await tutorTurn(token, lesson._id.toString(), "สวัสดี");
     const sys = capturedSystemInstruction();
     expect(sys).not.toContain("== สิ่งที่รู้เกี่ยวกับเพื่อนคนนี้ ==");
+  });
+});
+
+describe("memory shelved by default (AI_MEMORY_ENABLED unset)", () => {
+  // Force the default off state, independent of any local .env, so the
+  // controller neither schedules an update nor injects a digest.
+  let prevFlag: string | undefined;
+  beforeEach(() => {
+    prevFlag = process.env.AI_MEMORY_ENABLED;
+    delete process.env.AI_MEMORY_ENABLED;
+  });
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.AI_MEMORY_ENABLED;
+    else process.env.AI_MEMORY_ENABLED = prevFlag;
+  });
+
+  it("13. three logged-in turns trigger no memory update and create no doc", async () => {
+    mockMemoryJson({ changed: true, interests: ["should-not-save"] });
+    const { user, token } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    const contentId = lesson._id.toString();
+    await tutorTurn(token, contentId, "เทิร์น 1");
+    await tutorTurn(token, contentId, "เทิร์น 2");
+    await tutorTurn(token, contentId, "เทิร์น 3");
+    expect(memoryCalls()).toHaveLength(0);
+    expect(await StudentMemory.countDocuments()).toBe(0);
+  });
+
+  it("14. existing memory doc is NOT injected into the system instruction", async () => {
+    // A distinctive interest that does not otherwise appear in the prompt
+    // (avoid loanword-rule example words like "ฟุตบอล").
+    const uniqueInterest = "เลี้ยงปลากัด";
+    const { user, token } = await seedUser();
+    const lesson = await seedLesson(user._id, { access_type: "public" });
+    await StudentMemory.create({
+      user_id: user._id,
+      interests: [uniqueInterest],
+      strengths: [],
+      growth_areas: [],
+      preferences: [],
+      recent_topics: [],
+    });
+    await tutorTurn(token, lesson._id.toString(), "สวัสดี");
+    const sys = capturedSystemInstruction();
+    expect(sys).not.toContain("== สิ่งที่รู้เกี่ยวกับเพื่อนคนนี้ ==");
+    expect(sys).not.toContain(uniqueInterest);
   });
 });
 

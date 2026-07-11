@@ -7,6 +7,7 @@ import { recordServerError } from "../services/observability.service";
 import { callTutorModel, callTutorModelStream } from "../services/tutor/genaiClient";
 import {
   buildMemoryDigest,
+  isMemoryEnabled,
   runMemoryUpdate,
 } from "../services/tutor/memory";
 import { createSuggestionsGate, parseTutorReply } from "../services/tutor/parse";
@@ -299,7 +300,10 @@ async function persistTurn(opts: {
 
   const everyN = Number(process.env.AI_MEMORY_EVERY_N_TURNS) || 3;
   const studentTurns = session.messages.filter((m) => m.role === "student").length;
-  if (opts.mode === "write_evaluation" || studentTurns % everyN === 0) {
+  if (
+    isMemoryEnabled() &&
+    (opts.mode === "write_evaluation" || studentTurns % everyN === 0)
+  ) {
     void runMemoryUpdate({
       userId: new Types.ObjectId(opts.userId),
       contentId: new Types.ObjectId(opts.contentId),
@@ -417,11 +421,15 @@ export const tutorChat = async (
   let memoryDigest: string | undefined;
   let storedTutorPersonality = "";
   if (userId) {
+    // Still read the doc — it also holds tutor_personality (a separate feature
+    // from the shelved memory sketch). Only inject the digest when memory is on.
     const memory = await StudentMemory.findOne({
       user_id: new Types.ObjectId(userId),
     });
-    const digest = buildMemoryDigest(memory);
-    if (digest) memoryDigest = digest;
+    if (isMemoryEnabled()) {
+      const digest = buildMemoryDigest(memory);
+      if (digest) memoryDigest = digest;
+    }
     storedTutorPersonality = memory?.tutor_personality ?? "";
   }
 

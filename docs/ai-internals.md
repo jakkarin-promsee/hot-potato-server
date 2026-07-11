@@ -26,7 +26,9 @@ Loads the `Content`, serializes `tiptap_json` → **plain text + a `questions[]`
 
 ## `persona.ts` — the system instruction (the product's soul)
 
-`buildSystemInstruction(...)` assembles the system prompt **in a fixed order** (detailed in [`../../asking-flow.md`](../../asking-flow.md) §2): character "น้องมันฝรั่ง" → how-to-teach → **friend-safety rule** (overrides all) → **when-to-evaluate** (gated on the exact `[งานของเธอตอนนี้…]` tag) → length rules → **FORMAT (STRICT)** (+ anti-echo) → output language (+ loanword rule) → StudentMemory digest (login) → teacher `agent_settings` → the lesson text + questions.
+`buildSystemInstruction(...)` assembles the system prompt **in a fixed order** (detailed in [`../../asking-flow.md`](../../asking-flow.md) §2): character "น้องมันฝรั่ง" → how-to-teach (incl. the **goofing-off / play-along** rule) → **friend-safety rule** (overrides all) → **when-to-evaluate** (gated on the exact `[งานของเธอตอนนี้…]` tag) → length rules → **FORMAT (STRICT)** (+ anti-echo) → output language (+ loanword rule) → StudentMemory digest (login, **shelved by default**) → teacher `agent_settings` → the lesson text + questions → a **terminal `[SUGGESTIONS]` reminder** (restated last so a long lesson body can't push the output contract out of view).
+
+The output-language + loanword rules live in `services/aiLanguage.ts` (tone-neutral, **shared** with the creator copilot so they can't drift). The loanword gloss `คำไทย (english)` is scoped to real subject/theory terms only — everyday loanwords stay plain Thai (refined 2026-07-12). The praise rule has one carve-out: a blank/gibberish/"ไม่รู้"/joke answer has nothing real to praise, so the model must not fabricate it.
 
 **Invariants when editing here:**
 - Tags are **exported constants** (`FEEDBACK_TASK_TAG`, `currentSectionTag()`, `followupQuestionTag()`) and every internal bracket-tag prefix must be in **`INTERNAL_TAG_PREFIXES`** — `parse.ts` uses that list to strip leaks. Add a tag → add its prefix.
@@ -58,12 +60,12 @@ Wraps `@google/genai`: `callTutorModel` (JSON) + `callTutorModelStream` (SSE). G
 
 ## `models.ts` — model routing (single source of truth)
 
-`getFastModel()` = `AI_FAST_MODEL || gemini-2.5-flash-lite`; `getTutorModel()` = `AI_TUTOR_MODEL || AI_HEAVY_MODEL(legacy) || gemini-3.5-flash`. `resolveTutorModel` sends `question_feedback`+`quick_check` to the fast model, everything else to the tutor model. Defaults were chosen via `npm run check-models` (logged in `prompt-notes.md`).
+`getFastModel()` = `AI_FAST_MODEL || gemini-2.5-flash-lite`; `getTutorModel()` = `AI_TUTOR_MODEL || AI_HEAVY_MODEL(legacy) || gemini-2.5-flash` (tutor default switched from `gemini-3.5-flash` on **2026-07-12** — output cost; `DEFAULT_TUTOR_MODEL`/`PREMIUM_TUTOR_MODEL` constants live in `models.ts`). `resolveTutorModel` sends `question_feedback`+`quick_check` to the fast model, everything else to the tutor model. **Switch-back button:** set `AI_TUTOR_MODEL=gemini-3.5-flash` (Render env, no rebuild) to run the premium model for a special occasion — no feature changes, only reply quality/latency/cost. Defaults were chosen via `npm run check-models` (logged in `prompt-notes.md`).
 
 ## `personality.ts` & `memory.ts` — student tuning
 
 - **`personality.ts`** — a catalog of **6 student presets** + `resolvePersonality` (invalid id silently defaults). Injected **under** the teacher's `agent_settings` (ADR-013).
-- **`memory.ts`** — `runMemoryUpdate` distills recent turns into `StudentMemory` **async, every `AI_MEMORY_EVERY_N_TURNS` (default 3)** student messages, using the fast model; `buildMemoryDigest`/`buildMemoryPrompt` inject the sketch into the system instruction for logged-in students. Anonymous users have no memory.
+- **`memory.ts`** — `runMemoryUpdate` distills recent turns into `StudentMemory` **async, every `AI_MEMORY_EVERY_N_TURNS` (default 3)** student messages, using the fast model; `buildMemoryDigest`/`buildMemoryPrompt` inject the sketch into the system instruction for logged-in students. Anonymous users have no memory. **⚠️ Shelved by default (2026-07-12):** the whole feature is off unless `AI_MEMORY_ENABLED=true` (`isMemoryEnabled()`); the controller gates both the injection and the update call — not worth the tokens for now. `tutor_personality` (same doc) is a separate feature and still runs.
 
 ---
 
@@ -75,7 +77,8 @@ Wraps `@google/genai`: `callTutorModel` (JSON) + `callTutorModelStream` (SSE). G
 | What the AI sees in a lesson | `lessonContext.service.ts` | serializer unit tests |
 | Suggestion/label/tag handling | `parse.ts` | keep the 3-file `[SUGGESTIONS]` contract + tests |
 | Model defaults/routing | `models.ts` | `check-models`, log in `prompt-notes.md` |
-| Student memory cadence/shape | `memory.ts` | clamp `AI_MEMORY_EVERY_N_TURNS` (see notes.md) |
+| Student memory cadence/shape | `memory.ts` | first flip `AI_MEMORY_ENABLED=true` (shelved by default), then clamp `AI_MEMORY_EVERY_N_TURNS` |
+| Shared output-language / loanword rule | `aiLanguage.ts` | affects tutor **and** creator; log in `prompt-notes.md` |
 | A new mode / input field | `tutor.controller.ts` | add a `coerce*` guard + supertest |
 
 *The teacher copilot (`services/creator/*`) mirrors this pipeline but is teacher-only and JSON-mode; see [`../../docs/data-flow.md`](../../docs/data-flow.md) §6.*

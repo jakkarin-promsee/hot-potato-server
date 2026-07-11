@@ -15,7 +15,7 @@ All notable changes to the API. Format loosely follows [Keep a Changelog](https:
 
 ### Changed
 - Migrated the AI SDK from `@google/generative-ai` to **`@google/genai`**.
-- Model defaults centralized in `services/tutor/models.ts` (`gemini-2.5-flash-lite` fast / `gemini-3.5-flash` tutor).
+- Model defaults centralized in `services/tutor/models.ts` (`gemini-2.5-flash-lite` fast / `gemini-2.5-flash` tutor — switched from `gemini-3.5-flash` on 2026-07-12 for output cost; flip back via `AI_TUTOR_MODEL=gemini-3.5-flash`).
 - Split boot: `app.ts` exports the app, `index.ts` boots it (enables offline tests).
 
 ### Removed

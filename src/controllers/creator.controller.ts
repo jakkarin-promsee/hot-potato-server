@@ -195,6 +195,10 @@ async function runAction(
             ? "mixed"
             : null;
       if (!difficulty) return bad("difficulty ต้องเป็น easy, medium, hard หรือ mixed");
+      const gradeLevel = optStr(payload.gradeLevel, 20);
+      if (gradeLevel === null) return bad("gradeLevel ไม่ถูกต้อง");
+      const styleHint = optStr(payload.styleHint, 500);
+      if (styleHint === null) return bad("styleHint ไม่ถูกต้อง");
       const result = await callJson(
         getTutorModel(),
         buildGenerateQuestionsPrompt({
@@ -204,6 +208,8 @@ async function runAction(
           types,
           count,
           difficulty,
+          gradeLevel: gradeLevel || undefined,
+          styleHint: styleHint || undefined,
         }),
         validateGenerateQuestionsResult,
       );
@@ -275,9 +281,15 @@ async function runAction(
     case "import_structure": {
       const rawText = reqStr(payload.rawText, 20000);
       if (!rawText) return bad("ต้องส่ง rawText (ไม่เกิน 20000 ตัวอักษร)");
+      const styleHint = optStr(payload.styleHint, 500);
+      if (styleHint === null) return bad("styleHint ไม่ถูกต้อง");
       const result = await callJson(
         getTutorModel(),
-        buildImportStructurePrompt({ lesson, rawText }),
+        buildImportStructurePrompt({
+          lesson,
+          rawText,
+          styleHint: styleHint || undefined,
+        }),
         validateImportStructureResult,
       );
       return { ok: true, result };

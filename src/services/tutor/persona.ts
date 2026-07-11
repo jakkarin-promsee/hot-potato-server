@@ -1,6 +1,7 @@
 import type { LessonContext } from "../lessonContext.service";
 import type { IAgentSettings } from "../../models/content.model";
 import type { TutorPersonality } from "./personality";
+import { loanwordRule, outputLanguageRule } from "../aiLanguage";
 
 export const TUTOR_NAME = "น้องมันฝรั่ง";
 
@@ -26,32 +27,6 @@ export const INTERNAL_TAG_PREFIXES = [
   "ตอนนี้เพื่อนกำลังอ่าน",
   "คำถามที่คุยกันอยู่",
 ] as const;
-
-function outputLanguageRule(): string {
-  const lang = (process.env.AI_OUTPUT_LANGUAGE ?? "thai")
-    .trim()
-    .toLowerCase();
-  if (lang === "english") {
-    return "Respond primarily in English. Keep formulas, symbols, and code in their original form.";
-  }
-  return "ตอบเป็นภาษาไทยเป็นหลัก โดยคงสูตร สัญลักษณ์ และโค้ดไว้ตามเดิม";
-}
-
-/**
- * Loanword accessibility rule (owner request 2026-07-11): many students can't
- * read English, so any English-borrowed term must be written in Thai with the
- * original English in parentheses — "คำไทย (คำอังกฤษ)" — never dropped, never
- * left as bare English. Thai-output only; in english mode there is nothing to
- * gloss so this returns "". Kept in sync with the creator copilot's copy (see
- * services/creator/prompts.ts) and prompt-notes.md.
- */
-function loanwordRule(): string {
-  const lang = (process.env.AI_OUTPUT_LANGUAGE ?? "thai").trim().toLowerCase();
-  if (lang === "english") return "";
-  return (
-    'คำทับศัพท์และศัพท์เทคนิคที่ยืมมาจากภาษาอังกฤษ (เช่น อิเล็กตรอน เซลล์ อัลกอริทึม โฟตอน) ให้พิมพ์เป็นคำไทยแล้ววงเล็บภาษาอังกฤษต้นฉบับกำกับไว้เสมอ ในรูปแบบ "คำไทย (คำอังกฤษ)" เช่น "อิเล็กตรอน (electron)", "เซลล์ (cell)" — วงเล็บกำกับแค่ครั้งแรกที่พูดถึงคำนั้นในข้อความหนึ่งก็พอ ไม่ต้องวงเล็บซ้ำทุกครั้ง ห้ามตัดคำทับศัพท์ที่ใช้บ่อยทิ้ง และห้ามเขียนศัพท์เป็นภาษาอังกฤษล้วนๆ โดยไม่มีคำไทย เพราะเพื่อนหลายคนอ่านภาษาอังกฤษไม่ได้ (สูตร สัญลักษณ์ และโค้ด คงไว้ตามเดิม ไม่ต้องแปลง)'
-  );
-}
 
 function formatQuestionLines(lesson: LessonContext): string {
   if (!lesson.questions.length) return "(ไม่มีคำถาม)";
@@ -128,6 +103,7 @@ export function buildSystemInstruction(opts: {
     "== YOUR CHARACTER ==",
     "- Talk like a close friend who happens to love this subject: casual Thai (ภาษาพูด สุภาพแบบเพื่อน), short sentences, light humor, occasional emoji (max 1-2 per reply).",
     "- You genuinely believe every student's idea has something good in it. Your job is to find it and say it FIRST, specifically — name the exact part of their thinking that works. Generic praise (\"เก่งมาก\") is forbidden; specific praise (\"ตรงที่เธอเชื่อม A กับ B นี่คิดได้ดีมาก\") is required.",
+    "- ONE exception to the praise rule: when an answer is blank, off-topic, a joke, random keys, or \"ไม่รู้\"/\"มั่วๆ\", there is nothing real to praise — so DON'T fake it. Never invent praise for thinking that isn't there. Warmly acknowledge the try itself, keep it light, and move on (see the goofing-off rule below).",
     "- NEVER say the student is wrong. Never use \"ผิด\", \"ไม่ถูก\", \"แย่\". Frame gaps as \"เกือบแล้ว\", \"ขาดอีกนิดเดียว\", \"ลองมองอีกมุมนึง\".",
     "- Keep formulas, symbols, and code in their original form. For vocabulary borrowed from English, follow the loanword rule in == OUTPUT LANGUAGE == (write it in Thai with the English in parentheses).",
     "",
@@ -136,6 +112,7 @@ export function buildSystemInstruction(opts: {
     "- If the student seems lost or asks something vague, help them form a better question — suggest what they could ask.",
     "- If something is not in the lesson, say so honestly, then give your best general guidance and connect it back to the lesson.",
     "- Match the student's energy: short question → short answer. Never lecture when a sentence will do.",
+    "- When the student is clearly goofing off, testing you, or messing around instead of really trying: DON'T force them back to the question, and don't grade the nonsense. Play along warmly for a beat — be a fun friend, roll with the joke, match their energy — then leave the door open to try for real (\"เอาจริงๆ ลองเดาดูสักนิดก็ได้นะ 😄\"). Keeping them here, relaxed and enjoying this, matters more than getting an answer right now — pressure and nagging make them close the tab. Let the urge to answer come from them.",
     "",
     "== ความปลอดภัยของเพื่อน (กติกานี้ชนะทุกข้อ) ==",
     "- If the student mentions being bullied, extreme stress, hopelessness, or wanting to hurt themselves: pause the lesson completely. Respond first with genuine warmth as a friend who cares, take their feelings seriously (never dismiss, never lecture, never play therapist), and gently encourage them to talk to a trusted adult — ครูที่ไว้ใจ ผู้ปกครอง หรือสายด่วนสุขภาพจิต 1323 (โทรฟรี 24 ชม.).",
@@ -202,6 +179,15 @@ export function buildSystemInstruction(opts: {
     "== คำถามในบทเรียน (ของคุณครู) ==",
     formatQuestionLines(lesson),
     "Guide answers are reference directions, not the only acceptable answers. Never reveal a guide answer verbatim before the student has attempted the question.",
+  );
+
+  // Terminal reminder: the lesson body above can be long, pushing the output
+  // contract far from the end of the prompt — restate it last so the model
+  // reliably closes with the suggestions block (recency).
+  sections.push(
+    "",
+    "== ย้ำก่อนตอบ ==",
+    "ปิดท้ายข้อความทุกครั้งด้วยบล็อก [SUGGESTIONS] ที่มีคำถามต่อยอดสั้นๆ ในมุมมองของเพื่อน 3 ข้อ ตามรูปแบบใน == OUTPUT FORMAT (STRICT) == ด้านบน",
   );
 
   return sections.join("\n");

@@ -245,7 +245,7 @@ describe("buildSystemInstruction", () => {
     expect(a).toBe(b);
   });
 
-  it("22. loanword rule: Thai output demands the 'คำไทย (คำอังกฤษ)' gloss; english omits it", () => {
+  it("22. loanword rule (refined): gloss only real subject terms; everyday words plain; english omits", () => {
     const prev = process.env.AI_OUTPUT_LANGUAGE;
     try {
       process.env.AI_OUTPUT_LANGUAGE = "thai";
@@ -253,8 +253,12 @@ describe("buildSystemInstruction", () => {
       expect(th).toContain("คำทับศัพท์");
       expect(th).toContain('"คำไทย (คำอังกฤษ)"');
       expect(th).toContain("อิเล็กตรอน (electron)");
-      // never dropped, never left as bare English
-      expect(th).toContain("ห้ามตัดคำทับศัพท์ที่ใช้บ่อยทิ้ง");
+      // never leave bare English without a Thai rendering
+      expect(th).toContain("ห้ามทิ้งคำภาษาอังกฤษไว้ล้วนๆ โดยไม่มีคำไทย");
+      // everyday loanwords are NOT glossed (the over-firing this fixes)
+      expect(th).toContain("ไม่ต้องวงเล็บภาษาอังกฤษ");
+      // don't guess/mistranslate when unsure
+      expect(th).toContain("อย่าเดาหรือแปลศัพท์เองเมื่อไม่แน่ใจ");
 
       process.env.AI_OUTPUT_LANGUAGE = "english";
       const en = buildSystemInstruction({ lesson: sampleLesson });
@@ -263,6 +267,29 @@ describe("buildSystemInstruction", () => {
       if (prev === undefined) delete process.env.AI_OUTPUT_LANGUAGE;
       else process.env.AI_OUTPUT_LANGUAGE = prev;
     }
+  });
+
+  it("23. non-serious answers: play along, don't force back, never fake praise", () => {
+    const sys = buildSystemInstruction({ lesson: sampleLesson });
+    // The one carve-out from the specific-praise rule
+    expect(sys).toContain("ONE exception to the praise rule");
+    expect(sys).toContain("DON'T fake it");
+    // The goofing-off coaching rule
+    expect(sys).toContain("goofing off, testing you");
+    expect(sys).toContain("Play along warmly");
+    expect(sys).toContain("Let the urge to answer come from them");
+  });
+
+  it("24. terminal reminder restates the [SUGGESTIONS] contract after the lesson body", () => {
+    const sys = buildSystemInstruction({ lesson: sampleLesson });
+    expect(sys).toContain("== ย้ำก่อนตอบ ==");
+    // the reminder must come AFTER the (potentially long) lesson section
+    const lessonIdx = sys.indexOf("== บทเรียน:");
+    const reminderIdx = sys.indexOf("== ย้ำก่อนตอบ ==");
+    expect(lessonIdx).toBeGreaterThan(-1);
+    expect(reminderIdx).toBeGreaterThan(lessonIdx);
+    // and it is the last mention of the suggestions marker in the prompt
+    expect(sys.lastIndexOf("[SUGGESTIONS]")).toBeGreaterThan(lessonIdx);
   });
 
   it("21. ordering: teacher section before personality before lesson", () => {

@@ -13,6 +13,20 @@ import { getFastModel } from "./models";
 const MEMORY_DIGEST_MAX = 600;
 const TOPIC_SUMMARY_MAX = 200;
 
+/**
+ * Student-memory is **shelved by default** (owner decision 2026-07-12): the
+ * per-N-turns distillation cost real Gemini tokens for little payoff, so it is
+ * off unless `AI_MEMORY_ENABLED=true`. When off, the controller neither reads
+ * the digest into the system instruction nor schedules `runMemoryUpdate`. The
+ * code stays intact so it can be switched back on. Read at call time (a test or
+ * a redeploy can flip the env without a rebuild). Note: this flag does NOT gate
+ * `runMemoryUpdate` itself — the controller is the single call site that gates
+ * it, so the function stays directly unit-testable.
+ */
+export function isMemoryEnabled(): boolean {
+  return process.env.AI_MEMORY_ENABLED === "true";
+}
+
 function clampStringList(items: unknown, cap: number): string[] {
   if (!Array.isArray(items)) return [];
   return items
