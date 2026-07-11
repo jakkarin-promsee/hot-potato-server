@@ -3,13 +3,20 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import { Types } from "mongoose";
 
-const { mockGenerateContent } = vi.hoisted(() => ({
+const { mockGenerateContent, mockVerifyIdToken } = vi.hoisted(() => ({
   mockGenerateContent: vi.fn(async () => ({ text: "MOCK_AI_REPLY" })),
+  mockVerifyIdToken: vi.fn(),
 }));
 
 vi.mock("@google/genai", () => ({
   GoogleGenAI: class {
     models = { generateContent: mockGenerateContent };
+  },
+}));
+
+vi.mock("google-auth-library", () => ({
+  OAuth2Client: class {
+    verifyIdToken = mockVerifyIdToken;
   },
 }));
 
@@ -89,6 +96,124 @@ describe("POST /api/auth/login", () => {
       .send({ email: validUser.email, password: "wrong-password" });
     expect(res.status).toBe(401); // characterized 2026-07-09
     expect(res.body.message).toBe("Invalid email or password");
+  });
+});
+
+describe("POST /api/auth/google", () => {
+  const googleTicket = (overrides: Record<string, unknown> = {}) => ({
+    getPayload: () => ({
+      sub: "google-sub-1",
+      email: "google.user@test.local",
+      email_verified: true,
+      name: "Google User",
+      ...overrides,
+    }),
+  });
+
+  const signInWithGoogle = (overrides: Record<string, unknown> = {}) => {
+    mockVerifyIdToken.mockResolvedValueOnce(googleTicket(overrides));
+    return request(app)
+      .post("/api/auth/google")
+      .send({ credential: "fake-google-jwt" });
+  };
+
+  it("10. missing credential → 400", async () => {
+    const res = await request(app).post("/api/auth/google").send({});
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("Google credential is required");
+  });
+
+  it("11. rejected verification → 401", async () => {
+    mockVerifyIdToken.mockRejectedValueOnce(new Error("bad token"));
+    const res = await request(app)
+      .post("/api/auth/google")
+      .send({ credential: "garbage" });
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe("Invalid Google credential");
+  });
+
+  it("12. unverified Google email → 401", async () => {
+    const res = await signInWithGoogle({ email_verified: false });
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe("Invalid Google credential");
+  });
+
+  it("13. creates a passwordless learner on first sign-in", async () => {
+    const res = await signInWithGoogle();
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.user.role).toBe("learner");
+    expect(res.body.user.email).toBe("google.user@test.local");
+
+    const { User } = await import("../../src/models/user.model");
+    const user = await User.findOne({ email: "google.user@test.local" });
+    expect(user?.googleId).toBe("google-sub-1");
+    expect(user?.password).toBeUndefined();
+  });
+
+  it("14. second sign-in reuses the same account", async () => {
+    await signInWithGoogle();
+    const res = await signInWithGoogle();
+    expect(res.status).toBe(200);
+
+    const { User } = await import("../../src/models/user.model");
+    expect(
+      await User.countDocuments({ email: "google.user@test.local" }),
+    ).toBe(1);
+  });
+
+  it("15. auto-links an existing password account with the same email", async () => {
+    await request(app).post("/api/auth/register").send(validUser);
+    const res = await signInWithGoogle({ email: validUser.email });
+    expect(res.status).toBe(200);
+
+    const { User } = await import("../../src/models/user.model");
+    const user = await User.findOne({ email: validUser.email });
+    expect(user?.googleId).toBe("google-sub-1");
+
+    // Password login must still work after linking.
+    const pwRes = await request(app)
+      .post("/api/auth/login")
+      .send({ email: validUser.email, password: validUser.password });
+    expect(pwRes.status).toBe(200);
+  });
+
+  it("16. blocked Google account → 403", async () => {
+    await signInWithGoogle();
+    const { User } = await import("../../src/models/user.model");
+    await User.updateOne(
+      { email: "google.user@test.local" },
+      { $set: { status: "blocked" } },
+    );
+
+    const res = await signInWithGoogle();
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe(
+      "Your account has been suspended or blocked",
+    );
+  });
+
+  it("17. password login on a Google-only account points at the button", async () => {
+    await signInWithGoogle();
+    const res = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "google.user@test.local", password: "whatever-123" });
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe(
+      "This account uses Google sign-in — use the Google button",
+    );
+  });
+
+  it("18. change-password on a Google-only account → 400", async () => {
+    const googleRes = await signInWithGoogle();
+    const res = await request(app)
+      .put("/api/auth/change-password")
+      .set("Authorization", `Bearer ${googleRes.body.token}`)
+      .send({ currentPassword: "whatever-123", newPassword: "new-password-1" });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe(
+      "This account signs in with Google and has no password",
+    );
   });
 });
 

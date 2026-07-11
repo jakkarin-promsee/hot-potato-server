@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   register,
   login,
+  googleLogin,
   recheckToken,
   changePassword,
 } from "../controllers/auth.controller";
@@ -13,6 +14,7 @@ const authLimiter = createAuthRateLimiter();
 
 router.post("/register", authLimiter, register);
 router.post("/login", authLimiter, login);
+router.post("/google", authLimiter, googleLogin);
 router.get("/recheck", protect, recheckToken);
 router.put("/change-password", protect, changePassword);
 

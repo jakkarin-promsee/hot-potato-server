@@ -18,6 +18,8 @@ process.env.CLOUDINARY_CLOUD_NAME =
   process.env.CLOUDINARY_CLOUD_NAME || "test-cloud";
 process.env.CLOUDINARY_UPLOAD_PRESET =
   process.env.CLOUDINARY_UPLOAD_PRESET || "test-preset";
+process.env.GOOGLE_CLIENT_ID =
+  process.env.GOOGLE_CLIENT_ID || "test-google-client-id";
 
 let mongod: MongoMemoryServer;
 

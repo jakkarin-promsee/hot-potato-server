@@ -91,9 +91,10 @@ Guard legend: **🔒 protect** (valid JWT required) · **🔓 optionalAuth** (wo
 | Method | Path | Guard | Purpose |
 | --- | --- | --- | --- |
 | POST | `/register` | 🌐 + auth rate limit | Create account → `{ user, token }` (always `learner`; `role` in body ignored; password ≥ 8) |
-| POST | `/login` | 🌐 + auth rate limit | Log in → `{ user, token }` |
+| POST | `/login` | 🌐 + auth rate limit | Log in → `{ user, token }` (Google-only accounts get a 401 pointing at the Google button) |
+| POST | `/google` | 🌐 + auth rate limit | **Google sign-in (2026-07-11):** verifies a GIS ID-token `credential` (`google-auth-library`, audience = `GOOGLE_CLIENT_ID`), then find-or-create: match by `googleId` → auto-link existing account by verified email → else create a passwordless `learner`. Returns the same `{ user, token }` shape as `/login`. |
 | GET | `/recheck` | 🔒 | Re-validate token, return fresh user |
-| PUT | `/change-password` | 🔒 | Change password |
+| PUT | `/change-password` | 🔒 | Change password (400 for passwordless Google-only accounts) |
 
 ### `/api/content` — `content.controller.ts`
 | Method | Path | Guard | Purpose |
@@ -160,7 +161,7 @@ Defined in `models/*.model.ts`. Mongoose `timestamps` add `createdAt`/`updatedAt
 
 | Model | Key fields | Notes |
 | --- | --- | --- |
-| **User** | `name`, `email` (unique, lowercased), `password`, `role`, `status` | `role`: `admin \| creator \| learner` (default `learner`). `status`: `active \| blocked \| suspended`. Password auto-hashed (bcrypt, cost 12) in a `pre("save")` hook; `comparePassword()` method. |
+| **User** | `name`, `email` (unique, lowercased), `password?`, `googleId?`, `role`, `status` | `role`: `admin \| creator \| learner` (default `learner`). `status`: `active \| blocked \| suspended`. Password auto-hashed (bcrypt, cost 12) in a `pre("save")` hook; `comparePassword()` returns `false` when no password. **`password` is optional for Google-only accounts** (`googleId` set, unique+sparse — Google sign-in 2026-07-11). |
 | **UserData** | `user_id` (unique), `avatar?`, `bio?`, `metadata` (Mixed) | Optional profile extension. Flexible `metadata` for future use. |
 | **Content** | `owner_id`, `collaborators[]`, `title`, `title_image`, `tiptap_json`, `access_type`, `topics[]`, `description`, `agent_settings` | The lesson. `agent_settings`: `{ persona_note, allow_direct_answers, scope, custom_guidelines }` — teacher AI tutor controls (Tier 1.B). `tiptap_json` is the **stringified TipTap document** (default `"{}"`). `access_type`: `public \| link-only \| private` (default `private`). `author_name` + `collaborator_names[]` are **denormalized** copies kept in sync by `contentAuthorSnapshot.service.ts`. |
 | **UserContent** | `user_id`, `content_id`, `answers: Map<blockId, any>`, `last_visited` | One row per (user, content). The **student progress / answers** tracker. Unique compound index. |
@@ -230,6 +231,7 @@ Create `server/.env` (git-ignored). See [`README.md`](README.md) for description
 | `JWT_SECRET` | **yes** | JWT signing secret |
 | `JWT_EXPIRES_IN` | yes | Token lifetime (e.g. `7d`) |
 | `GEMINI_API_KEY` | **yes** | Google Gemini API key |
+| `GOOGLE_CLIENT_ID` | for Google sign-in | OAuth 2.0 Web client id (Google Cloud Console); audience for verifying GIS credentials on `POST /auth/google`. Unset → that endpoint returns 500; the client hides the button when its own `VITE_GOOGLE_CLIENT_ID` is unset. |
 | `CLOUDINARY_CLOUD_NAME` | yes | Cloudinary account |
 | `CLOUDINARY_UPLOAD_PRESET` | yes | Cloudinary unsigned preset |
 | `AI_OUTPUT_LANGUAGE` | no | `thai` (default) or `english` |

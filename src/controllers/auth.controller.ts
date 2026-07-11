@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import { OAuth2Client, TokenPayload } from "google-auth-library";
 import { User } from "../models/user.model";
 import { AuthRequest } from "../types";
 
@@ -94,7 +95,13 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  // 3. Compare password
+  // 3. Compare password (Google-only accounts have none — point them at the button)
+  if (!user.password) {
+    res
+      .status(401)
+      .json({ message: "This account uses Google sign-in — use the Google button" });
+    return;
+  }
   const isMatch = await user.comparePassword(password);
   if (!isMatch) {
     res.status(401).json({ message: "Invalid email or password" });
@@ -102,6 +109,85 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 
   // 4. Generate token
+  const token = generateToken(user._id.toString());
+
+  res.json({
+    token,
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
+  });
+};
+
+// POST /api/auth/google — GIS ID-token flow: the client's "Sign in with Google"
+// button hands us a credential (Google-signed JWT); we verify it against our
+// client id, find-or-create the user, and mint the app's own JWT. Response
+// shape is identical to /login, so nothing downstream changes.
+let googleClient: OAuth2Client | undefined;
+
+export const googleLogin = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const { credential } = req.body;
+
+  if (typeof credential !== "string" || !credential) {
+    res.status(400).json({ message: "Google credential is required" });
+    return;
+  }
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    res.status(500).json({ message: "Google sign-in is not configured" });
+    return;
+  }
+
+  let payload: TokenPayload | undefined;
+  try {
+    googleClient ??= new OAuth2Client(clientId);
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: clientId,
+    });
+    payload = ticket.getPayload();
+  } catch {
+    res.status(401).json({ message: "Invalid Google credential" });
+    return;
+  }
+
+  if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+    res.status(401).json({ message: "Invalid Google credential" });
+    return;
+  }
+
+  const email = normalizeEmail(payload.email);
+  let user = await User.findOne({ googleId: payload.sub });
+  if (!user) {
+    // Auto-link an existing password account with the same email (safe:
+    // Google verified it above); otherwise create a passwordless account.
+    user = await User.findOne({ email });
+    if (user) {
+      user.googleId = payload.sub;
+      await user.save();
+    } else {
+      user = await User.create({
+        name: (payload.name || email.split("@")[0]).trim(),
+        email,
+        googleId: payload.sub,
+      });
+    }
+  }
+
+  if (user.status !== "active") {
+    res
+      .status(403)
+      .json({ message: "Your account has been suspended or blocked" });
+    return;
+  }
+
   const token = generateToken(user._id.toString());
 
   res.json({
@@ -167,6 +253,13 @@ export const changePassword = async (
   const user = await User.findById(req.user!._id);
   if (!user) {
     res.status(404).json({ message: "User not found" });
+    return;
+  }
+
+  if (!user.password) {
+    res.status(400).json({
+      message: "This account signs in with Google and has no password",
+    });
     return;
   }
 
