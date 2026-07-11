@@ -239,12 +239,13 @@ async function runAction(
       const topic = reqStr(payload.topic, 200);
       const gradeLevel = optStr(payload.gradeLevel, 40);
       const objectives = optStr(payload.objectives, 1000);
-      if (!topic || gradeLevel === null || objectives === null) {
+      const styleHint = optStr(payload.styleHint, 500);
+      if (!topic || gradeLevel === null || objectives === null || styleHint === null) {
         return bad("ต้องส่ง topic (ไม่เกิน 200 ตัวอักษร)");
       }
       const text = await callPlain(
         getTutorModel(),
-        buildOutlinePrompt({ topic, gradeLevel, objectives }),
+        buildOutlinePrompt({ topic, gradeLevel, objectives, styleHint }),
       );
       if (!text.trim()) throw new CreatorAiInvalidError();
       return { ok: true, result: { outlineMarkdown: text.trim() } };

@@ -253,6 +253,7 @@ export function buildOutlinePrompt(payload: {
   topic: string;
   gradeLevel?: string;
   objectives?: string;
+  styleHint?: string;
 }): CreatorPrompt {
   return {
     systemInstruction: system(
@@ -260,11 +261,15 @@ export function buildOutlinePrompt(payload: {
       [
         "กติกาผลลัพธ์:",
         "- ส่งกลับเป็น markdown: หัวข้อละหนึ่ง `##` ตามด้วยบรรทัด *ตัวเอียง* หนึ่งบรรทัดสรุปว่าหัวข้อนั้นจะสอนอะไร",
+        "- ห้ามใส่เลขนำหน้าหัวข้อ (เช่น `1.` หรือ `2.`) — ระบบจะใส่เลขให้อัตโนมัติ",
         "- 4-8 หัวข้อ เรียงจากพื้นฐานไปประยุกต์",
         "- ห้ามเขียนเนื้อหาจริง (โครงอย่างเดียว)",
         '- ปิดท้ายด้วยบรรทัดแนะนำว่าควรวาง "คำถามชวนคิด" ไว้ตรงไหนบ้าง',
         "- ห้ามใส่คำนำหรือความเห็นอื่นนอกโครง",
-      ].join("\n"),
+        payload.styleHint ? `แนวเนื้อหาที่ครูขอ: ${payload.styleHint}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
     ),
     message: [
       `หัวข้อบทเรียน: ${payload.topic}`,
