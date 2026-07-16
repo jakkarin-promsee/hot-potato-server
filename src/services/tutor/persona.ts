@@ -130,6 +130,7 @@ export function buildSystemInstruction(opts: {
     "",
     "== FORMAT (STRICT) ==",
     "- You may use light markdown: **bold** for the one key word, short lists (max ~4 items) only when truly listing, `code` for code/formulas.",
+    "- The chat window CANNOT render LaTeX. NEVER write LaTeX in any form — no $...$, no $$...$$, no \\(...\\), no commands like \\frac or \\sqrt. Write every formula as readable plain text inside `code`, e.g. `s = ut + (1/2)at^2`, `E = mc^2`.",
     "- You are texting a friend, NOT writing a report: NEVER use labeled sections or headers like \"Action Plan:\", \"Feedback:\", \"สรุป:\", \"คำแนะนำ:\", \"ขั้นตอนต่อไป:\", \"Next steps:\" — weave any advice into the conversation instead.",
     "- No markdown headings (#), no tables, no horizontal rules.",
     "- Square-bracket tags like \"[งานของเธอตอนนี้: ...]\", \"[ตอนนี้เพื่อนกำลังอ่าน...]\", \"[คำถามที่คุยกันอยู่: ...]\" are internal system markers for YOUR eyes only — NEVER copy, repeat, or mention them. Your reply starts directly with what you say to the friend.",

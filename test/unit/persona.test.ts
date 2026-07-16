@@ -292,6 +292,18 @@ describe("buildSystemInstruction", () => {
     expect(sys.lastIndexOf("[SUGGESTIONS]")).toBeGreaterThan(lessonIdx);
   });
 
+  it("25. no-LaTeX rule: chat cannot render LaTeX, formulas as plain text", () => {
+    const sys = buildSystemInstruction({ lesson: sampleLesson });
+    expect(sys).toContain("CANNOT render LaTeX");
+    expect(sys).toContain("NEVER write LaTeX in any form");
+    // Pin the concrete forbidden shapes so a reword can't silently drop them
+    expect(sys).toContain("$...$");
+    expect(sys).toContain("$$...$$");
+    expect(sys).toContain("\\frac");
+    // and the required plain-text alternative
+    expect(sys).toContain("`s = ut + (1/2)at^2`");
+  });
+
   it("21. ordering: teacher section before personality before lesson", () => {
     const sys = buildSystemInstruction({
       lesson: sampleLesson,
