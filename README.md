@@ -2,7 +2,7 @@
 
 # Hot Potato — Server
 
-**The REST API behind Hot Potato: authentication, lesson storage, student progress, and a streaming Google Gemini AI tutor.**
+**The API behind teacher-led lessons and an AI study companion that helps students think through their own questions.**
 
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)](https://expressjs.com)
@@ -18,7 +18,9 @@
 
 ## Overview
 
-Hot Potato is a full-stack learning platform designed for students who are far from good schools and reliable internet. Teachers author rich lessons with embedded critical-thinking questions; students read the lessons, answer the questions, and can freely ask an AI tutor about the content. The AI (Google Gemini) gives warm, coaching-style feedback in Thai by default.
+Many students have material to read but no one available to discuss a question or test an idea with. Hot Potato supports critical thinking through lessons and question guidance set by teachers, paired with an AI study companion that students can ask open-ended questions. The student interface is Thai-first and phone-first for people with little tech experience; public lessons and AI chat work without an account.
+
+**Teachers own the instructional content and the tutor's direction.** The API stores their lesson document, questions, guide answers, and per-lesson `agent_settings`: response persona, whether to answer directly, lesson-only versus related general discussion, and custom guidelines. The AI can help a teacher structure pasted worksheet, Word, or note text into a draft, but the teacher previews and accepts it before publication. There is no automatic paper scanning in this flow.
 
 This repository contains the **REST API**: an Express 5 + TypeScript service backed by MongoDB, providing JWT authentication (email/password and Google Sign-In), lesson CRUD with access control and optimistic concurrency, per-student answer tracking, a Cloudinary-backed image library, and the entire AI layer — a unified streaming tutor endpoint and an eleven-action teacher copilot.
 
@@ -33,8 +35,9 @@ Two product principles shape the API design:
 
 ## Features
 
-- **Unified AI tutor endpoint** — a single `POST /api/chat/tutor` serves four conversation modes (free chat, question feedback, writing evaluation, follow-up). Supports Server-Sent Events streaming with a plain-JSON fallback, follow-up suggestion chips, six student-selectable tutor personalities, and per-lesson teacher controls (persona note, answer-directness, scope, custom guidelines).
-- **Teacher AI copilot** — `POST /api/creator/assist` exposes eleven authoring actions (outline, section drafting, structure import, proofreading with six presets, question generation, guide answers, distractors, lesson critic, publish metadata, tutor-settings suggestions). Generated JSON is validated server-side before it ever reaches the editor.
+- **Unified AI study companion** — a single `POST /api/chat/tutor` serves four conversation modes (free chat, question feedback, writing evaluation, follow-up). Students can ask beyond a right/wrong answer; the teacher's lesson and per-lesson settings guide the reply. Supports Server-Sent Events streaming with a plain-JSON fallback, follow-up suggestion chips, and six student-selectable tutor personalities.
+- **Teacher AI copilot** — `POST /api/creator/assist` exposes eleven authoring actions, including `import_structure` for pasted existing material, lesson outlining, drafting, question generation, and review. This lowers the work of moving teaching material online while keeping the teacher's preview-and-accept step. Generated JSON is validated server-side before it reaches the editor.
+- **Teacher-guided tutor style** — `Content.agent_settings` stores the persona note, answer directness, knowledge scope, and custom guidelines for each lesson; the server includes these in the tutor instruction along with the teacher-authored material.
 - **Server-owned lesson context** — the server loads and serializes the lesson document for every AI call (cached by `updatedAt`), so clients never ship lesson text over the wire.
 - **Student memory** — for logged-in students, a background job periodically distills conversations into a small personalization sketch (interests, strengths, growth areas) that is injected into the tutor's system instruction. Fully viewable and erasable by the student. _(Shelved by default since 2026-07-12 — enable with `AI_MEMORY_ENABLED=true`.)_
 - **Authentication** — JWT sessions with bcrypt-hashed passwords, Google Sign-In via verified Google Identity Services ID tokens (find-or-create with safe auto-linking by verified email), role-based guards (`admin` / `creator` / `learner`), and a structured 401 contract the client uses for automatic logout.
@@ -50,10 +53,11 @@ The web client is the usual caller. These are the main journeys through the API;
 | Journey | Request flow | Authentication |
 | --- | --- | --- |
 | **Find and read a public lesson** | `GET /api/content/search?explore=true` → `GET /api/content/load?id=<contentId>` | Optional; access checks still apply to private lessons |
-| **Ask the tutor about that lesson** | `POST /api/chat/tutor` with `contentId`, `mode: "free_chat"`, and `message`; use `stream: true` for SSE | Optional; anonymous callers send recent turns in `clientThread` |
+| **Ask the study companion anything about an idea** | `POST /api/chat/tutor` with `contentId`, `mode: "free_chat"`, and `message`; use `stream: true` for SSE. The teacher's settings determine whether related general topics are in scope. | Optional; anonymous callers send recent turns in `clientThread` |
 | **Answer a question** | The client evaluates a choice/blank or collects writing, then calls `POST /api/chat/tutor` in `question_feedback` or `write_evaluation` mode with `questionContext` | Optional; signed-in users can also save answers through `/api/content-answer/:contentId` |
 | **Create and publish a lesson** | `POST /api/content/create` → `PUT /api/content/:id` with the document and access settings | JWT; owner or collaborator for updates |
-| **Draft with the teacher copilot** | `POST /api/creator/assist` with `contentId`, an `action`, and its `payload`; preview the returned proposal in the client | JWT and lesson ownership/collaboration |
+| **Bring existing material online** | `POST /api/creator/assist` with `action: "import_structure"` and pasted `payload.rawText`; preview the proposed structure and questions in the client | JWT and lesson ownership/collaboration |
+| **Guide the tutor's style** | Save `agent_settings` with the lesson: persona note, direct-answer preference, scope, and custom guidelines | JWT and lesson ownership/collaboration |
 | **Check service health** | `GET /api/status/all` for a sanitized public view; `GET /api/status/` for admin diagnostics | Public / admin respectively |
 
 For a minimal anonymous tutor request after opening an accessible lesson:
