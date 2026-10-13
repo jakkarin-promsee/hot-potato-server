@@ -10,7 +10,7 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose_9-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com)
 [![Gemini](https://img.shields.io/badge/AI-Google_Gemini-4285F4?logo=google&logoColor=white)](https://ai.google.dev)
 
-[**Live API**](https://hot-potato-server.onrender.com) · [**Web Client**](https://hot-potato-client.vercel.app) · [**Client Repository**](https://github.com/Jakkarin-Promsee/hot-potato-client)
+[**Showcase**](https://hot-potato-client.vercel.app/) · [**Client Repository**](https://github.com/Jakkarin-Promsee/hot-potato-client) · [**Workspace Repository**](https://github.com/jakkarin-promsee/hop-potato-root)
 
 </div>
 
@@ -22,7 +22,9 @@ Hot Potato is a full-stack learning platform designed for students who are far f
 
 This repository contains the **REST API**: an Express 5 + TypeScript service backed by MongoDB, providing JWT authentication (email/password and Google Sign-In), lesson CRUD with access control and optimistic concurrency, per-student answer tracking, a Cloudinary-backed image library, and the entire AI layer — a unified streaming tutor endpoint and an eleven-action teacher copilot.
 
-> The project-wide overview, screenshots, and the step-by-step guide for running the full platform (server + client together) live in the [client repository's README](https://github.com/Jakkarin-Promsee/hot-potato-client#readme). This README is the deep reference for the API itself.
+> **Implementing a feature? Keep the [root workspace repository](https://github.com/jakkarin-promsee/hop-potato-root) alongside this repo.** Its [developer guidebook](https://github.com/jakkarin-promsee/hop-potato-root#developer-guidebook) covers the client/server contract, and its `graphify-out/` knowledge graph links routes, controllers, models, and client consumers. Consult the graph and both current codebases when changing an API response, lesson schema, access rule, or tutor behavior.
+
+> The project-wide overview and illustrated student and teacher use cases are in the [workspace README](https://github.com/jakkarin-promsee/hop-potato-root#readme) and [client README](https://github.com/Jakkarin-Promsee/hot-potato-client#use-cases). This README is the API reference and setup guide.
 
 Two product principles shape the API design:
 
@@ -40,6 +42,29 @@ Two product principles shape the API design:
 - **Resilience** — transient AI network errors are retried; model routing sends lightweight tasks to a fast model and coaching tasks to a stronger one; rate limiters are per-surface so teacher AI usage never consumes the student budget.
 - **Observability** — an in-memory error ring buffer and AI health snapshot surfaced through sanitized public status endpoints, with internals restricted to admins.
 - **Offline test suite** — Vitest + Supertest + in-memory MongoDB with a mocked Gemini client: no network, no real database, no API key required.
+
+## API use cases
+
+The web client is the usual caller. These are the main journeys through the API; the [route reference](#api-reference) below lists individual endpoints and their guards.
+
+| Journey | Request flow | Authentication |
+| --- | --- | --- |
+| **Find and read a public lesson** | `GET /api/content/search?explore=true` → `GET /api/content/load?id=<contentId>` | Optional; access checks still apply to private lessons |
+| **Ask the tutor about that lesson** | `POST /api/chat/tutor` with `contentId`, `mode: "free_chat"`, and `message`; use `stream: true` for SSE | Optional; anonymous callers send recent turns in `clientThread` |
+| **Answer a question** | The client evaluates a choice/blank or collects writing, then calls `POST /api/chat/tutor` in `question_feedback` or `write_evaluation` mode with `questionContext` | Optional; signed-in users can also save answers through `/api/content-answer/:contentId` |
+| **Create and publish a lesson** | `POST /api/content/create` → `PUT /api/content/:id` with the document and access settings | JWT; owner or collaborator for updates |
+| **Draft with the teacher copilot** | `POST /api/creator/assist` with `contentId`, an `action`, and its `payload`; preview the returned proposal in the client | JWT and lesson ownership/collaboration |
+| **Check service health** | `GET /api/status/all` for a sanitized public view; `GET /api/status/` for admin diagnostics | Public / admin respectively |
+
+For a minimal anonymous tutor request after opening an accessible lesson:
+
+```sh
+curl -X POST http://localhost:5000/api/chat/tutor \
+  -H 'Content-Type: application/json' \
+  -d '{"contentId":"<lesson-object-id>","mode":"free_chat","message":"ช่วยอธิบายหัวข้อนี้หน่อย"}'
+```
+
+Use a real lesson ID from the local database. The server loads the lesson context itself and returns JSON with `reply`, `suggestions`, and `sessionId`; add `"stream":true` to receive typed SSE events instead. Teacher and saved-progress routes require `Authorization: Bearer <token>`.
 
 ## Tech stack
 
@@ -274,7 +299,7 @@ test/
 
 ## Deployment
 
-The API is deployed to **Render** as a Node web service:
+The API is configured for **Render** as a Node web service:
 
 - **Build command:** `npm install && npm run build`
 - **Start command:** `npm start`
@@ -297,4 +322,4 @@ The API is deployed to **Render** as a Node web service:
 
 ## License
 
-Released under the [ISC License](https://opensource.org/license/isc-license-txt).
+`package.json` currently declares ISC. Add a `LICENSE` file before treating that declaration as a complete distribution license.
