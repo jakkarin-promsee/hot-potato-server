@@ -326,4 +326,4 @@ The API is configured for **Render** as a Node web service:
 
 ## License
 
-`package.json` currently declares ISC. Add a `LICENSE` file before treating that declaration as a complete distribution license.
+Original code and documentation authored by Jakkarin Promsee are licensed under the [MIT License](LICENSE). Third-party code, assets, datasets, and other materials are not covered by this license; their original terms apply.
